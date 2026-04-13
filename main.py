@@ -1,356 +1,225 @@
-from typing import TypedDict, Literal, List
+from typing import TypedDict, Annotated, List
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
-from langchain_core.messages import SystemMessage, HumanMessage
 
 
 # =========================
 # 1. STATE
 # =========================
-class TicketState(TypedDict, total=False):
+class HelpdeskState(TypedDict):
     ticket_id: str
     user_name: str
     user_message: str
-    clarification_answer: str
-
-    category: Literal["login", "payment", "bug", "general", "unknown"]
-    priority: Literal["low", "medium", "high"]
-    enough_info: bool
-
-    assignee: Literal["billing_team", "tech_team", "support_bot", "human_operator"]
-    resolution_type: Literal["auto_resolved", "escalated", "need_more_info"]
-
-    status: Literal[
-        "new",
-        "waiting_for_info",
-        "assigned",
-        "resolved",
-        "escalated",
-        "closed"
-    ]
-
-    clarification_question: str
-    final_answer: str
-    history: List[str]
+    status: str
+    assigned_team: str
+    resolution: str
+    messages: Annotated[List, add_messages]
 
 
 # =========================
-# 2. MODELS
+# 2. TOOLS
 # =========================
-llm_fast = ChatOllama(
+@tool
+def search_kb(query: str) -> str:
+    """Ищет решение проблемы в базе знаний."""
+    kb = {
+        "не могу войти": "Попросите пользователя сбросить пароль и очистить cookies.",
+        "ошибка оплаты": "Проверьте статус транзакции и запросите чек при необходимости.",
+        "не открывается курс": "Проверьте наличие активной подписки и обновите права доступа."
+    }
+
+    query_lower = query.lower()
+    for key, value in kb.items():
+        if key in query_lower:
+            return value
+    return "Подходящего решения в базе знаний не найдено."
+
+
+@tool
+def check_priority(text: str) -> str:
+    """Определяет приоритет заявки."""
+    text = text.lower()
+    if "срочно" in text or "не работает" in text:
+        return "high"
+    if "ошибка" in text or "не могу" in text:
+        return "medium"
+    return "low"
+
+
+@tool
+def assign_team(category: str) -> str:
+    """Назначает команду для обработки заявки."""
+    mapping = {
+        "login": "tech_team",
+        "payment": "billing_team",
+        "bug": "tech_team",
+        "general": "support_team",
+        "unknown": "human_operator",
+    }
+    return mapping.get(category, "human_operator")
+
+
+@tool
+def escalate_ticket(ticket_id: str, reason: str) -> str:
+    """Передаёт заявку живому специалисту."""
+    return f"Тикет {ticket_id} эскалирован специалисту. Причина: {reason}"
+
+
+@tool
+def close_ticket(ticket_id: str, resolution: str) -> str:
+    """Закрывает заявку с указанным решением."""
+    return f"Тикет {ticket_id} закрыт. Решение: {resolution}"
+
+
+tools = [search_kb, check_priority, assign_team, escalate_ticket, close_ticket]
+
+
+# =========================
+# 3. MODELS
+# =========================
+# Модель для оркестрации
+llm_agent = ChatOllama(
     model="llama3.2:1b",
-    base_url="http://localhost:11434",
-    # base_url="http://ollama:11434",
+    base_url="http://ollama:11434",
     temperature=0,
-)
+).bind_tools(tools)
 
-llm_smart = ChatOllama(
+# Более сильная модель для финального красивого ответа
+llm_final = ChatOllama(
     model="llama3.2:1b",
-    base_url="http://localhost:11434",
-    # base_url="http://ollama:11434",
+    base_url="http://ollama:11434",
     temperature=0.2,
 )
 
 
 # =========================
-# 3. NODE: CREATE TICKET
+# 4. PREPARE NODE
 # =========================
-def create_ticket(state: TicketState) -> dict:
-    history = state.get("history", [])
-    history.append(f"Заявка {state['ticket_id']} создана")
+def prepare_ticket(state: HelpdeskState) -> HelpdeskState:
     return {
         "status": "new",
-        "history": history,
+        "assigned_team": "",
+        "resolution": "",
+        "messages": [
+            HumanMessage(
+                content=(
+                    f"Пользователь {state['user_name']} создал тикет {state['ticket_id']}.\n"
+                    f"Сообщение: {state['user_message']}\n\n"
+                    "Нужно обработать заявку. "
+                    "Используй доступные инструменты, если это необходимо. "
+                    "Сначала определи приоритет, потом попробуй найти решение в базе знаний. "
+                    "Если решения нет или проблема сложная — эскалируй. "
+                    "Если решение найдено — закрой тикет."
+                )
+            )
+        ],
     }
 
 
 # =========================
-# 4. NODE: CLASSIFY TICKET
+# 5. AGENT NODE
 # =========================
-def classify_ticket(state: TicketState) -> dict:
-    text = state.get("user_message", "")
-    clarification = state.get("clarification_answer", "")
-
-    full_text = f"""
-    Сообщение пользователя: {text}
-    Уточнение пользователя: {clarification}
-    """
-
-    messages = [
-        SystemMessage(content=(
-            "Ты классификатор заявок техподдержки. "
-            "Определи категорию и приоритет. "
-            "Категории: login, payment, bug, general, unknown. "
-            "Приоритет: low, medium, high. "
-            "Если данных мало, считай enough_info=false. "
-            "Ответь строго в формате:\n"
-            "category=<...>\npriority=<...>\nenough_info=<true/false>"
-        )),
-        HumanMessage(content=full_text)
-    ]
-
-    response = llm_fast.invoke(messages)
-    content = response.content.lower()
-
-    category = "unknown"
-    priority = "medium"
-    enough_info = True
-
-    for item in ["login", "payment", "bug", "general", "unknown"]:
-        if f"category={item}" in content:
-            category = item
-            break
-
-    for item in ["low", "medium", "high"]:
-        if f"priority={item}" in content:
-            priority = item
-            break
-
-    if "enough_info=false" in content:
-        enough_info = False
-
-    history = state.get("history", [])
-    history.append(
-        f"Классификация: category={category}, priority={priority}, enough_info={enough_info}"
+def agent_node(state: HelpdeskState):
+    system = SystemMessage(
+        content=(
+            "Ты AI-агент службы поддержки. "
+            "Ты умеешь пользоваться инструментами. "
+            "Действуй пошагово: оцени приоритет, найди решение, назначь команду при необходимости, "
+            "эскалируй сложные случаи, закрывай простые."
+        )
     )
-
-    return {
-        "category": category,
-        "priority": priority,
-        "enough_info": enough_info,
-        "history": history,
-    }
+    response = llm_agent.invoke([system] + state["messages"])
+    return {"messages": [response]}
 
 
 # =========================
-# 5. NODE: ASK CLARIFICATION
+# 6. ROUTER
 # =========================
-def ask_clarification(state: TicketState) -> dict:
-    messages = [
-        SystemMessage(content=(
-            "Ты сотрудник техподдержки. "
-            "Сформулируй один короткий уточняющий вопрос пользователю."
-        )),
-        HumanMessage(content=(
-            f"Категория заявки: {state.get('category', 'unknown')}\n"
-            f"Текст заявки: {state.get('user_message', '')}"
-        ))
+def should_continue(state: HelpdeskState) -> str:
+    last_message = state["messages"][-1]
+    if isinstance(last_message, AIMessage) and last_message.tool_calls:
+        return "continue"
+    return "end"
+
+
+# =========================
+# 7. FINALIZE NODE
+# =========================
+def finalize_node(state: HelpdeskState):
+    last_ai = state["messages"][-1].content if state["messages"] else ""
+    final_prompt = [
+        SystemMessage(
+            content=(
+                "Ты вежливый сотрудник техподдержки. "
+                "Сформируй краткий итоговый ответ пользователю на русском языке."
+            )
+        ),
+        HumanMessage(
+            content=(
+                f"Тикет: {state['ticket_id']}\n"
+                f"Пользователь: {state['user_name']}\n"
+                f"Исходное сообщение: {state['user_message']}\n"
+                f"Результат обработки: {last_ai}"
+            )
+        )
     ]
-
-    response = llm_fast.invoke(messages)
-    question = response.content.strip()
-
-    history = state.get("history", [])
-    history.append(f"Запрошено уточнение: {question}")
-
+    response = llm_final.invoke(final_prompt)
     return {
-        "status": "waiting_for_info",
-        "clarification_question": question,
-        "resolution_type": "need_more_info",
-        "history": history,
+        "resolution": response.content,
+        "status": "closed",
     }
 
 
 # =========================
-# 6. NODE: ASSIGN TICKET
+# 8. GRAPH
 # =========================
-def assign_ticket(state: TicketState) -> dict:
-    category = state.get("category", "unknown")
+builder = StateGraph(HelpdeskState)
 
-    if category == "payment":
-        assignee = "billing_team"
-    elif category in {"login", "bug"}:
-        assignee = "tech_team"
-    elif category == "general":
-        assignee = "support_bot"
-    else:
-        assignee = "human_operator"
+builder.add_node("prepare_ticket", prepare_ticket)
+builder.add_node("agent", agent_node)
+builder.add_node("tools", ToolNode(tools))
+builder.add_node("finalize", finalize_node)
 
-    history = state.get("history", [])
-    history.append(f"Заявка назначена: {assignee}")
-
-    return {
-        "assignee": assignee,
-        "status": "assigned",
-        "history": history,
-    }
-
-
-# =========================
-# 7. NODE: AUTO RESOLVE
-# =========================
-def auto_resolve_ticket(state: TicketState) -> dict:
-    category = state.get("category", "unknown")
-    priority = state.get("priority", "medium")
-
-    # Простая логика автоматического решения
-    if category == "general":
-        resolution_type = "auto_resolved"
-        status = "resolved"
-    elif category == "login" and priority != "high":
-        resolution_type = "auto_resolved"
-        status = "resolved"
-    else:
-        resolution_type = "escalated"
-        status = "escalated"
-
-    history = state.get("history", [])
-    history.append(
-        f"Результат автообработки: resolution_type={resolution_type}, status={status}"
-    )
-
-    return {
-        "resolution_type": resolution_type,
-        "status": status,
-        "history": history,
-    }
-
-
-# =========================
-# 8. NODE: ESCALATE
-# =========================
-def escalate_ticket(state: TicketState) -> dict:
-    history = state.get("history", [])
-    history.append("Заявка передана живому специалисту")
-
-    return {
-        "assignee": "human_operator",
-        "resolution_type": "escalated",
-        "status": "escalated",
-        "history": history,
-    }
-
-
-# =========================
-# 9. NODE: FINAL ANSWER
-# =========================
-def generate_final_answer(state: TicketState) -> dict:
-    messages = [
-        SystemMessage(content=(
-            "Ты вежливый сотрудник службы поддержки. "
-            "Сформируй краткий, понятный ответ пользователю на русском языке."
-        )),
-        HumanMessage(content=f"""
-        Имя пользователя: {state.get("user_name", "")}
-        Текст заявки: {state.get("user_message", "")}
-        Категория: {state.get("category", "")}
-        Приоритет: {state.get("priority", "")}
-        Исполнитель: {state.get("assignee", "")}
-        Статус: {state.get("status", "")}
-        Тип решения: {state.get("resolution_type", "")}
-        Вопрос для уточнения: {state.get("clarification_question", "")}
-        """)
-    ]
-
-    response = llm_smart.invoke(messages)
-    answer = response.content.strip()
-
-    history = state.get("history", [])
-    history.append(f"Сформирован финальный ответ: {answer}")
-
-    final_status = state.get("status", "closed")
-    if final_status in {"resolved", "escalated"}:
-        final_status = "closed"
-
-    return {
-        "final_answer": answer,
-        "status": final_status,
-        "history": history,
-    }
-
-
-# =========================
-# 10. ROUTERS
-# =========================
-def route_after_classification(state: TicketState) -> str:
-    if not state.get("enough_info", True):
-        return "clarification"
-    return "assign"
-
-
-def route_after_assign(state: TicketState) -> str:
-    assignee = state.get("assignee", "")
-    if assignee == "support_bot":
-        return "auto_resolve"
-    if assignee == "tech_team" and state.get("priority") != "high":
-        return "auto_resolve"
-    return "escalate"
-
-
-def route_after_auto_resolve(state: TicketState) -> str:
-    if state.get("resolution_type") == "auto_resolved":
-        return "final"
-    return "escalate"
-
-
-# =========================
-# 11. GRAPH
-# =========================
-builder = StateGraph(TicketState)
-
-builder.add_node("create_ticket", create_ticket)
-builder.add_node("classify_ticket", classify_ticket)
-builder.add_node("ask_clarification", ask_clarification)
-builder.add_node("assign_ticket", assign_ticket)
-builder.add_node("auto_resolve_ticket", auto_resolve_ticket)
-builder.add_node("escalate_ticket", escalate_ticket)
-builder.add_node("generate_final_answer", generate_final_answer)
-
-builder.add_edge(START, "create_ticket")
-builder.add_edge("create_ticket", "classify_ticket")
+builder.add_edge(START, "prepare_ticket")
+builder.add_edge("prepare_ticket", "agent")
 
 builder.add_conditional_edges(
-    "classify_ticket",
-    route_after_classification,
+    "agent",
+    should_continue,
     {
-        "clarification": "ask_clarification",
-        "assign": "assign_ticket",
+        "continue": "tools",
+        "end": "finalize",
     }
 )
 
-# Цикл: после уточнения снова классифицируем
-builder.add_edge("ask_clarification", "classify_ticket")
-
-builder.add_conditional_edges(
-    "assign_ticket",
-    route_after_assign,
-    {
-        "auto_resolve": "auto_resolve_ticket",
-        "escalate": "escalate_ticket",
-    }
-)
-
-builder.add_conditional_edges(
-    "auto_resolve_ticket",
-    route_after_auto_resolve,
-    {
-        "final": "generate_final_answer",
-        "escalate": "escalate_ticket",
-    }
-)
-
-builder.add_edge("escalate_ticket", "generate_final_answer")
-builder.add_edge("generate_final_answer", END)
+builder.add_edge("tools", "agent")
+builder.add_edge("finalize", END)
 
 graph = builder.compile()
 
 
 # =========================
-# 12. RUN
+# 9. RUN
 # =========================
 initial_state = {
     "ticket_id": "T-1001",
-    "user_name": "Георгий",
-    "user_message": "У не работает, не могу понять причину, нет блока для ввода",
-    "clarification_answer": "",
-    "history": [],
+    "user_name": "Алексей",
+    "user_message": "Я не могу войти в личный кабинет, срочно нужен доступ к курсу",
+    "status": "",
+    "assigned_team": "",
+    "resolution": "",
+    "messages": [],
 }
 
-result = graph.invoke(initial_state, config={"recursion_limit": 10})
+result = graph.invoke(initial_state)
 
-print("=== ФИНАЛЬНЫЙ ОТВЕТ ===")
-print(result["final_answer"])
+print("=== RESULT ===")
+print(result["resolution"])
 
-print("\n=== ИСТОРИЯ ===")
-for item in result["history"]:
-    print("-", item)
+print("\n=== MESSAGE HISTORY ===")
+for msg in result["messages"]:
+    print(type(msg).__name__, ":", getattr(msg, "content", ""))
