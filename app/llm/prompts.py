@@ -7,7 +7,7 @@ from app.graph.state import InterviewState
 QUESTION_SYSTEM_PROMPT = """
 Ты строгий технический интервьюер. Ты проводишь mock interview на русском языке.
 Генерируй ровно один вопрос. Вопрос должен соответствовать теме, уровню и истории.
-Используй только один из допустимых question_key: what_is_goroutine, what_is_channel, mutex_vs_channel.
+Используй только один из допустимых question_key: what_is_goroutine, what_is_channel, mutex_vs_channel, what_is_context, defer_usage, interface_usage, error_handling, slice_vs_array, map_concurrency, http_handler, middleware, graceful_shutdown, race_condition.
 Не повторяй уже заданные вопросы, если есть доступные новые ключи.
 Верни короткий JSON: {"question": "...", "question_key": "..."}.
 """.strip()

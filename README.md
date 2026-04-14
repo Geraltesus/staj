@@ -2,8 +2,6 @@
 
 `Interview Mentor API` - учебный AI-агент для mock interview по техническим темам. Проект специально оставляет LangGraph видимым: граф собран вручную через `StateGraph`, узлы меняют общий state, а conditional edges показывают, как агент выбирает следующий шаг.
 
-![LangGraph workflow](./graph.png)
-
 ## Краткое описание
 
 Граф симулирует AI-наставника для технического mock interview: агент начинает интервью, задаёт вопрос, принимает ответ, оценивает его, выбирает следующий шаг и в конце выдаёт итоговый feedback. Узлы: `ask_question`, `evaluate_answer`, `decide_next`, `run_tool`, `final_review`, `respond`. State хранит пользователя, тему, уровень, текущий вопрос, ответ, оценку, feedback, историю, выбранное действие, результат tool и итоговый review. Модель: `llama3.2:1b` через Ollama.
@@ -15,6 +13,8 @@
 6 основных рёбер, 6 вспомогательных: основные рёбра ведут интервью от старта к вопросу, от ответа к оценке, от оценки к выбору следующего действия, дальше к следующему вопросу или финальному review. Вспомогательные рёбра обслуживают команду завершения, ветку tool, уточнение, форматирование ответа и выход из графа.
 
 `llama3.2:1b` используется для генерации вопросов, оценки ответов, выбора действия агента и финального review. Локальные JSON tools работают без отдельной модели: `generate_hint` достаёт подсказку, а `get_reference_answer` достаёт эталонный ответ; оба вызываются через единый узел `run_tool`.
+
+В локальной базе есть 13 вопросов по `golang_backend / junior`: goroutine, channel, mutex vs channel, context, defer, interfaces, error handling, slice vs array, concurrent map access, HTTP handlers, middleware, graceful shutdown и race condition.
 
 ## Что умеет проект
 
@@ -53,6 +53,18 @@ app/
   static/                  # браузерный чат
 ```
 
+## Docker
+
+`docker/app/Dockerfile` собирает контейнер приложения на базе `python:3.11-slim`: устанавливает зависимости из `requirements.txt`, копирует `app`, `tests`, `scripts` и запускает FastAPI через `uvicorn app.main:app`. Контейнер ожидает, что API будет доступен на `0.0.0.0:8000`, а адрес Ollama придёт из переменной `OLLAMA_BASE_URL`.
+
+`docker-compose.yml` поднимает весь локальный стек из трёх сервисов:
+
+- `ollama` - запускает Ollama API на порту `11434` и хранит модели в volume `ollama_data`;
+- `ollama_init` - один раз проверяет и скачивает модель `llama3.2:1b`, если её ещё нет;
+- `app` - запускает FastAPI, REST API и браузерный чат на порту `8000`.
+
+Для данных используются два volume: `ollama_data` хранит модели Ollama, а `sessions_data` хранит JSON-сессии пользователей между перезапусками контейнеров.
+
 ## LangGraph Workflow
 
 Граф состоит из 6 узлов:
@@ -65,6 +77,23 @@ app/
 | `run_tool` | Запускает локальный JSON tool для подсказки или эталонного ответа |
 | `final_review` | Формирует итоговый feedback |
 | `respond` | Превращает state в текст ответа для API и чата |
+
+Рёбра графа:
+
+| Ребро | Что означает |
+|---|---|
+| `START -> ask_question` | Новая или сброшенная сессия начинает интервью с первого вопроса |
+| `START -> evaluate_answer` | Пользователь прислал ответ на текущий вопрос |
+| `START -> final_review` | Пользователь отправил команду завершения |
+| `ask_question -> respond` | Новый вопрос готов к отправке в чат/API |
+| `evaluate_answer -> decide_next` | Ответ оценён, можно выбрать следующий шаг |
+| `decide_next -> ask_question` | Агент решил перейти к следующему вопросу |
+| `decide_next -> run_tool` | Агент решил вызвать подсказку или эталонный ответ |
+| `decide_next -> final_review` | Агент решил завершить интервью |
+| `decide_next -> respond` | Агент решил попросить уточнение |
+| `run_tool -> respond` | Результат локального tool готов к отправке |
+| `final_review -> respond` | Итоговый feedback готов к отправке |
+| `respond -> END` | Ответ сформирован, шаг графа завершён |
 
 ```mermaid
 flowchart TD
@@ -118,7 +147,73 @@ State хранится как JSON-совместимый словарь:
 | `Pydantic` | API-схемы и structured output |
 | `pydantic-settings` | Настройки из env |
 | `pytest` | Тесты |
-| `Pillow` | Локальная генерация `graph.png` |
+
+## Модели И Роли
+
+В проекте используется одна локальная модель: `llama3.2:1b` через Ollama. Она вызывается в разных ролях:
+
+| Узел | Роль модели |
+|---|---|
+| `ask_question` | Технический интервьюер, который генерирует следующий вопрос |
+| `evaluate_answer` | Оценщик, который возвращает score, verdict, feedback и missing points |
+| `decide_next` | Управляющий интервью, который выбирает следующее действие |
+| `final_review` | Наставник, который анализирует историю и формирует итоговый feedback |
+
+Локальные tools не используют отдельную модель. `generate_hint` читает подсказку из `app/tools/data/hints.json`, а `get_reference_answer` читает эталонный ответ из `app/tools/data/reference_answers.json`.
+
+## Как Запустить Локально
+
+Локальный запуск предполагает, что Ollama уже установлена и доступна на хосте.
+
+1. Установите зависимости:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Для PowerShell активация окружения выглядит так:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+2. Запустите Ollama и скачайте модель:
+
+```bash
+ollama pull llama3.2:1b
+```
+
+3. Создайте `.env` или задайте переменные окружения:
+
+```bash
+cp .env.example .env
+```
+
+Для локального запуска обычно нужен такой адрес Ollama:
+
+```text
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+4. Запустите API:
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+5. Откройте:
+
+```text
+http://localhost:8000
+```
+
+Swagger UI:
+
+```text
+http://localhost:8000/docs
+```
 
 ## Как Запустить Через Docker
 
@@ -196,12 +291,6 @@ python -m pytest tests -q
 
 ```bash
 docker compose run --rm app pytest
-```
-
-## Генерация Картинки Графа
-
-```bash
-python scripts/render_graph_png.py graph.png
 ```
 
 ## Ограничения MVP

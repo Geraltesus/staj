@@ -23,6 +23,16 @@ QUESTION_FALLBACKS = [
     ("what_is_goroutine", "Что такое goroutine в Go и зачем она нужна?"),
     ("what_is_channel", "Что такое channel в Go и как он помогает goroutine взаимодействовать?"),
     ("mutex_vs_channel", "Когда в Go лучше использовать mutex, а когда channel?"),
+    ("what_is_context", "Что такое context.Context в Go и зачем он нужен в backend-разработке?"),
+    ("defer_usage", "Как работает defer в Go и в каких случаях его удобно использовать?"),
+    ("interface_usage", "Что такое interface в Go и как он помогает писать гибкий код?"),
+    ("error_handling", "Как в Go принято обрабатывать ошибки и почему их обычно возвращают явно?"),
+    ("slice_vs_array", "Чем slice отличается от array в Go?"),
+    ("map_concurrency", "Почему обычный map в Go небезопасен для конкурентной записи и как это исправить?"),
+    ("http_handler", "Что такое http.Handler в Go и как он используется в HTTP-сервере?"),
+    ("middleware", "Что такое middleware в Go HTTP-сервисе и для чего он нужен?"),
+    ("graceful_shutdown", "Что такое graceful shutdown HTTP-сервера и зачем он нужен?"),
+    ("race_condition", "Что такое race condition и как её искать в Go?"),
 ]
 
 
