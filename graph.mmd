@@ -1,40 +1,19 @@
----
-config:
-  flowchart:
-    curve: linear
----
-graph TD;
-	__start__([<p>__start__</p>]):::first
-	init_interview(init_interview)
-	generate_question(generate_question)
-	evaluate_answer(evaluate_answer)
-	agent_decision(agent_decision)
-	adjust_difficulty(adjust_difficulty)
-	save_round(save_round)
-	final_review(final_review)
-	format_output(format_output)
-	generate_hint(generate_hint)
-	get_reference_answer(get_reference_answer)
-	__end__([<p>__end__</p>]):::last
-	__start__ -.-> evaluate_answer;
-	__start__ -.-> init_interview;
-	__start__ -.-> save_round;
-	adjust_difficulty --> save_round;
-	agent_decision -. &nbsp;ask_question&nbsp; .-> adjust_difficulty;
-	agent_decision -. &nbsp;clarify&nbsp; .-> format_output;
-	agent_decision -.-> generate_hint;
-	agent_decision -.-> get_reference_answer;
-	agent_decision -. &nbsp;finish&nbsp; .-> save_round;
-	evaluate_answer --> agent_decision;
-	final_review --> format_output;
-	generate_hint --> format_output;
-	generate_question --> format_output;
-	get_reference_answer --> format_output;
-	init_interview --> generate_question;
-	save_round -.-> final_review;
-	save_round -.-> generate_question;
-	format_output --> __end__;
-	save_round -.-> __end__;
-	classDef default fill:#f2f0ff,line-height:1.2
-	classDef first fill-opacity:0
-	classDef last fill:#bfb6fc
+flowchart TD
+    Start((START))
+    End((END))
+
+    Start -->|new session| ask_question
+    Start -->|answer| evaluate_answer
+    Start -->|finish command| final_review
+
+    ask_question --> respond
+    evaluate_answer --> decide_next
+
+    decide_next -->|ask_question| ask_question
+    decide_next -->|tool action| run_tool
+    decide_next -->|finish| final_review
+    decide_next -->|clarify| respond
+
+    run_tool --> respond
+    final_review --> respond
+    respond --> End

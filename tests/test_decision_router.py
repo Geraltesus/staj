@@ -1,9 +1,9 @@
-﻿from app.graph.routers.decision_router import route_by_decision
+from app.graph.simple_nodes import route_decision
 
 
-def test_route_valid_action():
-    assert route_by_decision({"pending_action": "generate_hint"}) == "generate_hint"
+def test_route_tool_action():
+    assert route_decision({"action": "generate_hint"}) == "run_tool"
 
 
 def test_route_invalid_action_fallback():
-    assert route_by_decision({"pending_action": "dance"}) == "clarify"
+    assert route_decision({"action": "dance"}) == "respond"

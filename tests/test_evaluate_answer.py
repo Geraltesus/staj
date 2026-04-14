@@ -1,4 +1,4 @@
-﻿from app.schemas.evaluation import EvaluationResult
+from app.schemas import EvaluationResult
 
 
 def test_evaluation_score_is_clamped():

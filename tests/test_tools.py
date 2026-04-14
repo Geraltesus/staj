@@ -1,5 +1,4 @@
-﻿from app.tools.hint_tool import FALLBACK_HINT, generate_hint
-from app.tools.reference_tool import FALLBACK_REFERENCE, get_reference_answer
+from app.tools.local_tools import FALLBACK_HINT, FALLBACK_REFERENCE, generate_hint, get_reference_answer
 
 
 def test_reference_answer_from_json():

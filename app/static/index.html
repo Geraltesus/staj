@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interview Mentor</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="shell">
+    <aside class="sidebar">
+      <p class="eyebrow">LangGraph + Ollama</p>
+      <h1>Mock interview</h1>
+      <p class="lead">Начните интервью, отвечайте на вопросы и получите короткий итоговый feedback.</p>
+
+      <label>
+        User ID
+        <input id="userId" type="number" min="1" value="1" />
+      </label>
+
+      <div class="buttons">
+        <button class="primary" id="startBtn">Начать</button>
+        <button id="finishBtn">Завершить</button>
+        <button id="resetBtn">Сбросить</button>
+      </div>
+    </aside>
+
+    <section class="chat">
+      <header>
+        <div>
+          <p class="eyebrow">Interview Mentor</p>
+          <strong>golang_backend / junior</strong>
+        </div>
+        <span id="statusText">ready</span>
+      </header>
+
+      <div class="messages" id="messages"></div>
+
+      <form class="composer" id="form">
+        <textarea id="answer" placeholder="Напишите ответ кандидата..." required></textarea>
+        <button class="primary" type="submit">Отправить</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -5,12 +5,12 @@ module and serves both REST endpoints and a lightweight local chat page.
 """
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
 from app.config import get_settings
 from app.utils.logger import configure_logging
-from app.web.chat_page import CHAT_HTML
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -21,10 +21,11 @@ app = FastAPI(
     version="0.1.0",
 )
 app.include_router(router)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
-@app.get("/", response_class=HTMLResponse)
-async def root() -> str:
+@app.get("/")
+async def root() -> FileResponse:
     """Serve the browser chat UI."""
 
-    return CHAT_HTML
+    return FileResponse("app/static/index.html")

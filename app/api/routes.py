@@ -7,7 +7,7 @@ for Docker-only learning: use curl, Postman, Swagger UI, or connect a frontend.
 from fastapi import APIRouter, Depends
 
 from app.dependencies import build_interview_service
-from app.schemas.api import AnswerRequest, HealthResponse, InterviewResponse, StartInterviewRequest
+from app.schemas import AnswerRequest, HealthResponse, InterviewResponse, StartInterviewRequest
 from app.services.interview_service import InterviewService
 
 router = APIRouter()
@@ -69,5 +69,5 @@ async def get_session(
     user_id: int,
     service: InterviewService = Depends(get_interview_service),
 ) -> InterviewResponse:
-    state = service.session_service.load_session(user_id, user_id)
+    state = service.sessions.load_session(user_id, user_id)
     return InterviewResponse(user_id=user_id, reply=state.get("bot_reply", ""), state=dict(state))

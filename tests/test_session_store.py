@@ -1,9 +1,9 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-from app.storage.session_repository import SessionRepository
+from app.storage.sessions import SessionRepository
 
 
 class DummySettings(BaseSettings):
@@ -17,10 +17,10 @@ def test_save_and_load_session(tmp_path):
     settings = DummySettings(sessions_dir=tmp_path)
     repo = SessionRepository(settings)  # type: ignore[arg-type]
     state = repo.reset_session(123, 456)
-    state["current_question"] = "What is goroutine?"
+    state["question"] = "What is goroutine?"
     repo.save_session(123, state)
 
     loaded = repo.load_session(123, 456)
     assert loaded["user_id"] == 123
     assert loaded["chat_id"] == 456
-    assert loaded["current_question"] == "What is goroutine?"
+    assert loaded["question"] == "What is goroutine?"

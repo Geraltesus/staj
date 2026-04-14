@@ -8,15 +8,15 @@ class ResponseService:
 
     def question(self, state: InterviewState) -> str:
         return (
-            f"Вопрос {state.get('current_question_index', 1)}/{state.get('max_questions', 3)} "
-            f"({state.get('topic')} / {state.get('current_level')}):\n\n"
-            f"{state.get('current_question')}"
+            f"Вопрос {state.get('question_index', 1)}/{state.get('max_questions', 3)} "
+            f"({state.get('topic')} / {state.get('level')}):\n\n"
+            f"{state.get('question')}"
         )
 
     def clarify(self, state: InterviewState) -> str:
         return (
             "Хочу чуть точнее понять ваш ответ.\n\n"
-            f"Комментарий: {state.get('current_feedback', 'Нужно больше деталей.')}\n\n"
+            f"Комментарий: {state.get('feedback', 'Нужно больше деталей.')}\n\n"
             "Уточните, пожалуйста, ответ на тот же вопрос."
         )
 

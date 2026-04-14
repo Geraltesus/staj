@@ -1,8 +1,4 @@
-﻿"""Render the Interview Mentor graph to a PNG file.
-
-This is the first local renderer used in the project: it draws a deterministic
-PNG without external services such as mermaid.ink and without Node/Mermaid CLI.
-"""
+"""Render the simplified Interview Mentor graph to a PNG file."""
 
 from __future__ import annotations
 
@@ -11,8 +7,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-CANVAS_WIDTH = 1800
-CANVAS_HEIGHT = 1350
+CANVAS_WIDTH = 1500
+CANVAS_HEIGHT = 980
 BACKGROUND = (255, 250, 240)
 INK = (23, 33, 27)
 MUTED = (89, 103, 92)
@@ -23,39 +19,29 @@ TOOL = (219, 233, 209)
 LINE = (90, 77, 57)
 
 NODES = {
-    "START": (760, 40, 1040, 120, "START", "entry"),
-    "init_interview": (120, 210, 420, 310, "init_interview", "start session"),
-    "generate_question": (590, 210, 910, 310, "generate_question", "LLM asks question"),
-    "format_output": (1180, 210, 1500, 310, "format_output", "reply for chat/API"),
-    "evaluate_answer": (120, 460, 420, 560, "evaluate_answer", "LLM scores answer"),
-    "agent_decision": (590, 460, 910, 560, "agent_decision", "LLM chooses route"),
-    "adjust_difficulty": (1180, 430, 1500, 530, "adjust_difficulty", "up / keep / down"),
-    "save_round": (1180, 650, 1500, 750, "save_round", "append history"),
-    "generate_hint": (120, 760, 420, 860, "generate_hint", "local JSON tool"),
-    "get_reference_answer": (590, 760, 910, 860, "get_reference_answer", "local JSON tool"),
-    "final_review": (1180, 890, 1500, 990, "final_review", "LLM final feedback"),
-    "END": (760, 1150, 1040, 1230, "END", "done"),
+    "START": (610, 40, 890, 120, "START", "entry"),
+    "ask_question": (110, 220, 410, 320, "ask_question", "LLM asks question"),
+    "evaluate_answer": (610, 220, 910, 320, "evaluate_answer", "LLM scores answer"),
+    "decide_next": (610, 420, 910, 520, "decide_next", "choose route"),
+    "run_tool": (110, 610, 410, 710, "run_tool", "local JSON tool"),
+    "final_review": (610, 610, 910, 710, "final_review", "LLM final feedback"),
+    "respond": (1080, 420, 1380, 520, "respond", "reply for chat/API"),
+    "END": (1080, 790, 1380, 870, "END", "done"),
 }
 
 EDGES = [
-    ("START", "init_interview", "new session"),
+    ("START", "ask_question", "new session"),
     ("START", "evaluate_answer", "answer"),
-    ("START", "save_round", "finish command"),
-    ("init_interview", "generate_question", "interview started"),
-    ("generate_question", "format_output", "question ready"),
-    ("evaluate_answer", "agent_decision", "answer evaluated"),
-    ("agent_decision", "adjust_difficulty", "ask_question"),
-    ("agent_decision", "format_output", "clarify"),
-    ("agent_decision", "generate_hint", "hint"),
-    ("agent_decision", "get_reference_answer", "reference"),
-    ("agent_decision", "save_round", "finish"),
-    ("adjust_difficulty", "save_round", "difficulty changed"),
-    ("save_round", "generate_question", "continue"),
-    ("save_round", "final_review", "finish"),
-    ("generate_hint", "format_output", "hint reply"),
-    ("get_reference_answer", "format_output", "reference reply"),
-    ("final_review", "format_output", "summary reply"),
-    ("format_output", "END", "response returned"),
+    ("START", "final_review", "finish"),
+    ("ask_question", "respond", "question"),
+    ("evaluate_answer", "decide_next", "evaluation"),
+    ("decide_next", "ask_question", "next question"),
+    ("decide_next", "run_tool", "tool"),
+    ("decide_next", "final_review", "finish"),
+    ("decide_next", "respond", "clarify"),
+    ("run_tool", "respond", "tool reply"),
+    ("final_review", "respond", "summary"),
+    ("respond", "END", "response"),
 ]
 
 
@@ -84,12 +70,8 @@ def edge_points(source: str, target: str) -> tuple[tuple[int, int], tuple[int, i
     tcx, tcy = center((tx1, ty1, tx2, ty2))
 
     if abs(tcx - scx) > abs(tcy - scy):
-        start = (sx2, scy) if tcx > scx else (sx1, scy)
-        end = (tx1, tcy) if tcx > scx else (tx2, tcy)
-    else:
-        start = (scx, sy2) if tcy > scy else (scx, sy1)
-        end = (tcx, ty1) if tcy > scy else (tcx, ty2)
-    return start, end
+        return ((sx2, scy) if tcx > scx else (sx1, scy), (tx1, tcy) if tcx > scx else (tx2, tcy))
+    return ((scx, sy2) if tcy > scy else (scx, sy1), (tcx, ty1) if tcy > scy else (tcx, ty2))
 
 
 def draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int], label: str, font: ImageFont.ImageFont) -> None:
@@ -119,9 +101,9 @@ def draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int
 
 def draw_node(draw: ImageDraw.ImageDraw, data: tuple[int, int, int, int, str, str], title_font: ImageFont.ImageFont, subtitle_font: ImageFont.ImageFont) -> None:
     x1, y1, x2, y2, title, subtitle = data
-    fill = TOOL if "tool" in subtitle else PANEL
-    outline = ACCENT if title in {"agent_decision", "final_review"} else SAGE
-    draw.rounded_rectangle([x1, y1, x2, y2], radius=24, fill=fill, outline=outline, width=4)
+    fill = TOOL if title == "run_tool" else PANEL
+    outline = ACCENT if title in {"decide_next", "final_review"} else SAGE
+    draw.rounded_rectangle([x1, y1, x2, y2], radius=8, fill=fill, outline=outline, width=4)
     draw.text(((x1 + x2) // 2, y1 + 35), title, fill=INK, font=title_font, anchor="mm")
     draw.text(((x1 + x2) // 2, y1 + 68), subtitle, fill=MUTED, font=subtitle_font, anchor="mm")
 
@@ -129,13 +111,13 @@ def draw_node(draw: ImageDraw.ImageDraw, data: tuple[int, int, int, int, str, st
 def render(output_path: Path) -> None:
     image = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), BACKGROUND)
     draw = ImageDraw.Draw(image)
-    title_font = load_font(42, bold=True)
+    title_font = load_font(38, bold=True)
     node_font = load_font(24, bold=True)
     subtitle_font = load_font(18)
     edge_font = load_font(14)
 
-    draw.text((80, 55), "Interview Mentor LangGraph", fill=INK, font=title_font)
-    draw.text((80, 110), "10 nodes, 18 edges, Ollama llama3.2:1b + local JSON tools", fill=MUTED, font=subtitle_font)
+    draw.text((70, 55), "Interview Mentor LangGraph", fill=INK, font=title_font)
+    draw.text((70, 105), "6 semantic nodes, Ollama llama3.2:1b + local JSON tools", fill=MUTED, font=subtitle_font)
 
     for source, target, label in EDGES:
         draw_arrow(draw, *edge_points(source, target), label, edge_font)
