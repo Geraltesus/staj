@@ -19,6 +19,7 @@ class InterviewState(TypedDict, total=False):
     feedback: str
     missing_points: list[str]
     action: str
+    next_question_key: str
     tool_result: str
     history: list[dict[str, Any]]
     final_summary: str
@@ -53,6 +54,7 @@ def create_default_state(
         "feedback": "",
         "missing_points": [],
         "action": "ask_question",
+        "next_question_key": "",
         "tool_result": "",
         "history": [],
         "final_summary": "",

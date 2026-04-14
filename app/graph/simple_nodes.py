@@ -13,7 +13,7 @@ from app.llm.prompts import (
 from app.schemas import DecisionResult, EvaluationResult, FinalReviewResult
 from app.services.response_service import ResponseService
 from app.tools.local_tools import run_tool as run_local_tool
-from app.utils.constants import DEFAULT_SAFE_REPLY, LEVEL_ORDER
+from app.utils.constants import ALLOWED_QUESTION_KEYS, DEFAULT_SAFE_REPLY, LEVEL_ORDER
 from app.utils.logger import get_logger
 from app.utils.validators import normalize_action
 
@@ -34,28 +34,38 @@ QUESTION_FALLBACKS = [
     ("graceful_shutdown", "Что такое graceful shutdown HTTP-сервера и зачем он нужен?"),
     ("race_condition", "Что такое race condition и как её искать в Go?"),
 ]
+QUESTION_BY_KEY = dict(QUESTION_FALLBACKS)
+CONCURRENCY_QUESTION_KEYS = ["race_condition", "map_concurrency", "mutex_vs_channel", "what_is_channel", "what_is_goroutine"]
+HTTP_QUESTION_KEYS = ["http_handler", "middleware", "graceful_shutdown", "what_is_context"]
+BASICS_QUESTION_KEYS = ["error_handling", "interface_usage", "defer_usage", "slice_vs_array"]
 
 
 def make_ask_question_node(llm_client: OllamaLLMClient):
     def ask_question(state: InterviewState) -> InterviewState:
         state["interview_started"] = True
         state["action"] = "ask_question"
+        selected_key = state.get("next_question_key", "")
 
-        try:
-            content = llm_client.invoke(build_question_messages(state))
-            payload = _extract_question_payload(content)
-            key = payload.get("question_key", "")
-            question = payload.get("question", "")
-            if not key or not question:
-                raise ValueError("Question JSON misses fields")
-        except (LLMClientError, ValueError, json.JSONDecodeError) as exc:
-            logger.warning("Question generation fallback used: %s", exc)
-            key, question = _fallback_question(state)
+        if _can_use_question_key(state, selected_key):
+            key = selected_key
+            question = QUESTION_BY_KEY[key]
+        else:
+            try:
+                content = llm_client.invoke(build_question_messages(state))
+                payload = _extract_question_payload(content)
+                key = payload.get("question_key", "")
+                question = payload.get("question", "")
+                if not _can_use_question_key(state, key) or not question:
+                    raise ValueError("Question JSON misses fields or repeats question")
+            except (LLMClientError, ValueError, json.JSONDecodeError) as exc:
+                logger.warning("Question generation fallback used: %s", exc)
+                key, question = _fallback_question(state)
 
         state["question_key"] = key
         state["question"] = question
         state["question_index"] = int(state.get("question_index", 0)) + 1
         state["answer"] = ""
+        state["next_question_key"] = ""
         state["tool_result"] = ""
         return state
 
@@ -87,15 +97,21 @@ def make_decide_next_node(llm_client: OllamaLLMClient):
             logger.warning("Decision fallback used: %s", exc)
             result = _fallback_decision(state)
 
-        if int(state.get("question_index", 0)) >= int(state.get("max_questions", 3)):
+        if int(state.get("question_index", 0)) >= int(state.get("max_questions", 5)):
             result.action = "finish"
             result.difficulty_change = "keep"
+            result.next_question_key = ""
 
         state["action"] = result.action
         if result.action in {"ask_question", "finish"}:
             _save_round(state)
         if result.action == "ask_question":
             _apply_difficulty_change(state, result.difficulty_change)
+            state["next_question_key"] = result.next_question_key
+            if not _can_use_question_key(state, state["next_question_key"]):
+                state["next_question_key"] = _fallback_question(state)[0]
+        else:
+            state["next_question_key"] = ""
         return state
 
     return decide_next
@@ -214,11 +230,54 @@ def _extract_question_payload(content: str) -> dict:
 
 
 def _fallback_question(state: InterviewState) -> tuple[str, str]:
+    available = _available_question_keys(state)
+    if not available:
+        asked_count = len(state.get("history", []))
+        return QUESTION_FALLBACKS[asked_count % len(QUESTION_FALLBACKS)]
+
+    for key in _preferred_question_keys(state):
+        if key in available:
+            return key, QUESTION_BY_KEY[key]
+
+    key = _rotated_fallback_keys(state, available)[0]
+    return key, QUESTION_BY_KEY[key]
+
+
+def _can_use_question_key(state: InterviewState, question_key: str) -> bool:
+    if question_key not in ALLOWED_QUESTION_KEYS:
+        return False
+    return question_key in _available_question_keys(state)
+
+
+def _available_question_keys(state: InterviewState) -> list[str]:
     asked = {item.get("question_key") for item in state.get("history", [])}
-    for key, question in QUESTION_FALLBACKS:
-        if key not in asked:
-            return key, question
-    return QUESTION_FALLBACKS[len(asked) % len(QUESTION_FALLBACKS)]
+    return [key for key, _question in QUESTION_FALLBACKS if key not in asked]
+
+
+def _preferred_question_keys(state: InterviewState) -> list[str]:
+    signal = " ".join(
+        [
+            state.get("question_key", ""),
+            state.get("question", ""),
+            state.get("answer", ""),
+            state.get("feedback", ""),
+            " ".join(state.get("missing_points", [])),
+        ]
+    ).lower()
+
+    if any(word in signal for word in ("goroutine", "channel", "mutex", "race", "concurr", "sync", "map")):
+        return CONCURRENCY_QUESTION_KEYS
+    if any(word in signal for word in ("http", "server", "request", "handler", "middleware", "shutdown", "context")):
+        return HTTP_QUESTION_KEYS
+    if any(word in signal for word in ("error", "interface", "slice", "array", "defer", "panic")):
+        return BASICS_QUESTION_KEYS
+    return []
+
+
+def _rotated_fallback_keys(state: InterviewState, keys: list[str]) -> list[str]:
+    seed = int(state.get("user_id", 0)) * 17 + int(state.get("chat_id", 0)) * 31 + int(state.get("question_index", 0)) * 7
+    offset = seed % len(keys)
+    return keys[offset:] + keys[:offset]
 
 
 def _fallback_evaluation(answer: str) -> EvaluationResult:
@@ -238,11 +297,17 @@ def _fallback_evaluation(answer: str) -> EvaluationResult:
 
 
 def _fallback_decision(state: InterviewState) -> DecisionResult:
-    if int(state.get("question_index", 0)) >= int(state.get("max_questions", 3)):
-        return DecisionResult(action="finish", difficulty_change="keep", reason="Reached max questions")
+    if int(state.get("question_index", 0)) >= int(state.get("max_questions", 5)):
+        return DecisionResult(action="finish", difficulty_change="keep", next_question_key="", reason="Reached max questions")
     if len(state.get("answer", "").strip()) < 30:
-        return DecisionResult(action="clarify", difficulty_change="keep", reason="Answer is too short")
-    return DecisionResult(action="ask_question", difficulty_change="keep", reason="Safe fallback continues interview")
+        return DecisionResult(action="clarify", difficulty_change="keep", next_question_key="", reason="Answer is too short")
+    next_question_key = _fallback_question(state)[0]
+    return DecisionResult(
+        action="ask_question",
+        difficulty_change="keep",
+        next_question_key=next_question_key,
+        reason="Safe fallback continues interview",
+    )
 
 
 def _fallback_review(state: InterviewState) -> FinalReviewResult:

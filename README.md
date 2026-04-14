@@ -4,17 +4,19 @@
 
 ## Краткое описание
 
-Граф симулирует AI-наставника для технического mock interview: агент начинает интервью, задаёт вопрос, принимает ответ, оценивает его, выбирает следующий шаг и в конце выдаёт итоговый feedback. Узлы: `ask_question`, `evaluate_answer`, `decide_next`, `run_tool`, `final_review`, `respond`. State хранит пользователя, тему, уровень, текущий вопрос, ответ, оценку, feedback, историю, выбранное действие, результат tool и итоговый review. Модель: `llama3.2:1b` через Ollama.
+Граф симулирует AI-наставника для технического mock interview: агент начинает интервью, задаёт вопрос, принимает ответ, оценивает его, выбирает следующий шаг и подбирает следующий вопрос по предыдущим ответам. В конце агент выдаёт итоговый feedback. Узлы: `ask_question`, `evaluate_answer`, `decide_next`, `run_tool`, `final_review`, `respond`. State хранит пользователя, тему, уровень, текущий вопрос, ответ, оценку, feedback, историю, выбранное действие, следующий `question_key`, результат tool и итоговый review. Модель: `llama3.2:1b` через Ollama.
 
-Проект запускается через Docker, поднимает Ollama, загружает `llama3.2:1b`, открывает веб-чат на `http://localhost:8000`, сохраняет сессии в JSON и даёт REST API со Swagger UI. Интервью работает по теме `golang_backend`: агент задаёт вопросы, оценивает ответы, может попросить уточнение, дать подсказку, показать эталонный ответ или завершить интервью.
+Проект запускается через Docker, поднимает Ollama, загружает `llama3.2:1b`, открывает веб-чат на `http://localhost:8000`, сохраняет сессии в JSON и даёт REST API со Swagger UI. Интервью работает по теме `golang_backend` и по умолчанию длится до 5 вопросов: агент задаёт вопросы, оценивает ответы, может попросить уточнение, дать подсказку, показать эталонный ответ или завершить интервью.
 
 5 основных узлов, 1 вспомогательный: `ask_question`, `evaluate_answer`, `decide_next`, `run_tool`, `final_review` выполняют основную логику интервью, а `respond` форматирует ответ для API и браузерного чата.
 
 6 основных рёбер, 6 вспомогательных: основные рёбра ведут интервью от старта к вопросу, от ответа к оценке, от оценки к выбору следующего действия, дальше к следующему вопросу или финальному review. Вспомогательные рёбра обслуживают команду завершения, ветку tool, уточнение, форматирование ответа и выход из графа.
 
-`llama3.2:1b` используется для генерации вопросов, оценки ответов, выбора действия агента и финального review. Локальные JSON tools работают без отдельной модели: `generate_hint` достаёт подсказку, а `get_reference_answer` достаёт эталонный ответ; оба вызываются через единый узел `run_tool`.
+`llama3.2:1b` используется для генерации первого вопроса, оценки ответов, выбора действия агента, выбора конкретного следующего вопроса и финального review. Локальные JSON tools работают без отдельной модели: `generate_hint` достаёт подсказку, а `get_reference_answer` достаёт эталонный ответ; оба вызываются через единый узел `run_tool`.
 
 В локальной базе есть 13 вопросов по `golang_backend / junior`: goroutine, channel, mutex vs channel, context, defer, interfaces, error handling, slice vs array, concurrent map access, HTTP handlers, middleware, graceful shutdown и race condition.
+
+Чтобы интервью не шло линейно по списку, доступные `question_key` передаются модели в сдвинутом порядке, а fallback выбирает вопрос по слабой теме последнего ответа: concurrency, HTTP/backend или базовые конструкции Go.
 
 ## Что умеет проект
 
@@ -36,18 +38,19 @@ app/
   config.py                # env settings
   dependencies.py          # сборка LLM, graph и session storage
 
-  api/routes.py            # HTTP endpoints
+api/routes.py            # HTTP endpoints
+
   services/interview_service.py
   services/response_service.py
 
-  graph/state.py           # InterviewState
+graph/state.py           # InterviewState
   graph/builder.py         # StateGraph wiring
   graph/simple_nodes.py    # смысловые LangGraph nodes
 
-  llm/client.py            # Ollama wrapper
+llm/client.py            # Ollama wrapper
   llm/prompts.py           # prompts + message builders
 
-  schemas/__init__.py      # API и structured-output схемы
+schemas/__init__.py      # API и structured-output схемы
   storage/sessions.py      # JSON-сессии
   tools/local_tools.py     # локальные JSON tools
   static/                  # браузерный чат
@@ -55,7 +58,7 @@ app/
 
 ## Docker
 
-`docker/app/Dockerfile` собирает контейнер приложения на базе `python:3.11-slim`: устанавливает зависимости из `requirements.txt`, копирует `app`, `tests`, `scripts` и запускает FastAPI через `uvicorn app.main:app`. Контейнер ожидает, что API будет доступен на `0.0.0.0:8000`, а адрес Ollama придёт из переменной `OLLAMA_BASE_URL`.
+`docker/app/Dockerfile` собирает контейнер приложения на базе `python:3.11-slim`: устанавливает зависимости из `requirements.txt`, копирует `app` и `tests`, затем запускает FastAPI через `uvicorn app.main:app`. Контейнер ожидает, что API будет доступен на `0.0.0.0:8000`, а адрес Ollama придёт из переменной `OLLAMA_BASE_URL`.
 
 `docker-compose.yml` поднимает весь локальный стек из трёх сервисов:
 
@@ -73,7 +76,7 @@ app/
 |---|---|
 | `ask_question` | Начинает интервью при необходимости, генерирует вопрос и обновляет `question_index` |
 | `evaluate_answer` | Оценивает ответ кандидата через LLM structured output |
-| `decide_next` | Выбирает действие агента и сохраняет завершённый раунд в `history` |
+| `decide_next` | Выбирает действие агента, конкретный следующий `question_key` и сохраняет завершённый раунд в `history` |
 | `run_tool` | Запускает локальный JSON tool для подсказки или эталонного ответа |
 | `final_review` | Формирует итоговый feedback |
 | `respond` | Превращает state в текст ответа для API и чата |
@@ -100,21 +103,21 @@ flowchart TD
     Start((START))
     End((END))
 
-    Start -->|new session| ask_question
-    Start -->|answer| evaluate_answer
-    Start -->|finish command| final_review
+    Start -->|new_session| ask_question
+    Start -->|answer_received| evaluate_answer
+    Start -->|finish_command| final_review
 
-    ask_question --> respond
-    evaluate_answer --> decide_next
+    ask_question -->|question_ready| respond
+    evaluate_answer -->|answer_evaluated| decide_next
 
-    decide_next -->|ask_question| ask_question
-    decide_next -->|tool action| run_tool
-    decide_next -->|finish| final_review
-    decide_next -->|clarify| respond
+    decide_next -->|action: ask_question| ask_question
+    decide_next -->|action: generate_hint / get_reference_answer| run_tool
+    decide_next -->|action: finish| final_review
+    decide_next -->|action: clarify| respond
 
-    run_tool --> respond
-    final_review --> respond
-    respond --> End
+    run_tool -->|tool_result_ready| respond
+    final_review -->|review_ready| respond
+    respond -->|reply_ready| End
 ```
 
 ## State Графа
@@ -128,6 +131,7 @@ State хранится как JSON-совместимый словарь:
 - `answer`;
 - `score`, `verdict`, `feedback`, `missing_points`;
 - `action`;
+- `next_question_key`;
 - `tool_result`;
 - `history`;
 - `final_summary`, `strong_sides`, `weak_sides`, `improvement_plan`;
@@ -156,7 +160,7 @@ State хранится как JSON-совместимый словарь:
 |---|---|
 | `ask_question` | Технический интервьюер, который генерирует следующий вопрос |
 | `evaluate_answer` | Оценщик, который возвращает score, verdict, feedback и missing points |
-| `decide_next` | Управляющий интервью, который выбирает следующее действие |
+| `decide_next` | Управляющий интервью, который выбирает следующее действие и конкретный следующий `question_key` |
 | `final_review` | Наставник, который анализирует историю и формирует итоговый feedback |
 
 Локальные tools не используют отдельную модель. `generate_hint` читает подсказку из `app/tools/data/hints.json`, а `get_reference_answer` читает эталонный ответ из `app/tools/data/reference_answers.json`.
@@ -292,12 +296,3 @@ python -m pytest tests -q
 ```bash
 docker compose run --rm app pytest
 ```
-
-## Ограничения MVP
-
-- Нет базы данных и Redis.
-- Нет Telegram, webhook и внешних bot API.
-- Нет streaming-ответов.
-- Tools локальные и читают JSON-файлы.
-- Данные примеров есть только для `golang_backend / junior`.
-- `llama3.2:1b` маленькая модель, поэтому fallback-и сохранены.

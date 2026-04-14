@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     app_port: int = Field(default=8000, alias="APP_PORT")
     ollama_base_url: str = Field(default="http://ollama:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="llama3.2:1b", alias="OLLAMA_MODEL")
-    max_questions: int = Field(default=3, alias="MAX_QUESTIONS")
+    max_questions: int = Field(default=5, alias="MAX_QUESTIONS")
     default_topic: str = Field(default="golang_backend", alias="DEFAULT_TOPIC")
     default_level: str = Field(default="junior", alias="DEFAULT_LEVEL")
     sessions_dir: Path = Field(default=Path("/app/app/storage/sessions"), alias="SESSIONS_DIR")

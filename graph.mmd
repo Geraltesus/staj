@@ -2,18 +2,18 @@ flowchart TD
     Start((START))
     End((END))
 
-    Start -->|new session| ask_question
-    Start -->|answer| evaluate_answer
-    Start -->|finish command| final_review
+    Start -->|new_session| ask_question
+    Start -->|answer_received| evaluate_answer
+    Start -->|finish_command| final_review
 
-    ask_question --> respond
-    evaluate_answer --> decide_next
+    ask_question -->|question_ready| respond
+    evaluate_answer -->|answer_evaluated| decide_next
 
-    decide_next -->|ask_question| ask_question
-    decide_next -->|tool action| run_tool
-    decide_next -->|finish| final_review
-    decide_next -->|clarify| respond
+    decide_next -->|action: ask_question| ask_question
+    decide_next -->|action: generate_hint / get_reference_answer| run_tool
+    decide_next -->|action: finish| final_review
+    decide_next -->|action: clarify| respond
 
-    run_tool --> respond
-    final_review --> respond
-    respond --> End
+    run_tool -->|tool_result_ready| respond
+    final_review -->|review_ready| respond
+    respond -->|reply_ready| End

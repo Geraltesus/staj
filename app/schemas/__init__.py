@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.utils.validators import clamp_score, normalize_action, normalize_difficulty_change, normalize_verdict
+from app.utils.validators import clamp_score, normalize_action, normalize_difficulty_change, normalize_question_key, normalize_verdict
 
 
 class StartInterviewRequest(BaseModel):
@@ -50,6 +50,7 @@ class EvaluationResult(BaseModel):
 class DecisionResult(BaseModel):
     action: Literal["ask_question", "clarify", "generate_hint", "get_reference_answer", "finish"]
     difficulty_change: Literal["up", "keep", "down"] = "keep"
+    next_question_key: str = ""
     reason: str
 
     @field_validator("action", mode="before")
@@ -61,6 +62,11 @@ class DecisionResult(BaseModel):
     @classmethod
     def validate_difficulty_change(cls, value: str) -> str:
         return normalize_difficulty_change(str(value))
+
+    @field_validator("next_question_key", mode="before")
+    @classmethod
+    def validate_next_question_key(cls, value: str) -> str:
+        return normalize_question_key(str(value))
 
 
 class FinalReviewResult(BaseModel):

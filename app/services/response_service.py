@@ -8,7 +8,7 @@ class ResponseService:
 
     def question(self, state: InterviewState) -> str:
         return (
-            f"Вопрос {state.get('question_index', 1)}/{state.get('max_questions', 3)} "
+            f"Вопрос {state.get('question_index', 1)}/{state.get('max_questions', 5)} "
             f"({state.get('topic')} / {state.get('level')}):\n\n"
             f"{state.get('question')}"
         )

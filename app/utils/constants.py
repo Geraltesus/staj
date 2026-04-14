@@ -13,3 +13,18 @@ OLLAMA_UNAVAILABLE_REPLY = (
 ALLOWED_ACTIONS = {"ask_question", "clarify", "generate_hint", "get_reference_answer", "finish"}
 ALLOWED_DIFFICULTY_CHANGES = {"up", "keep", "down"}
 LEVEL_ORDER = ["junior", "middle", "senior"]
+ALLOWED_QUESTION_KEYS = {
+    "what_is_goroutine",
+    "what_is_channel",
+    "mutex_vs_channel",
+    "what_is_context",
+    "defer_usage",
+    "interface_usage",
+    "error_handling",
+    "slice_vs_array",
+    "map_concurrency",
+    "http_handler",
+    "middleware",
+    "graceful_shutdown",
+    "race_condition",
+}

@@ -9,7 +9,7 @@ from app.storage.sessions import SessionRepository
 class DummySettings(BaseSettings):
     default_topic: str = "golang_backend"
     default_level: str = "junior"
-    max_questions: int = 3
+    max_questions: int = 5
     sessions_dir: Path = Field(default_factory=Path)
 
 
