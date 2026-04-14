@@ -1,0 +1,10 @@
+﻿.git
+.pytest_cache
+__pycache__
+*.pyc
+.env
+app/storage/sessions/*.json
+.venv
+venv
+.idea
+.vscode

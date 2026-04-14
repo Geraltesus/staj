@@ -1,112 +1,181 @@
-# Helpdesk LangGraph Project
+﻿# Interview Mentor API
 
-## Описание проекта
+Учебный AI-агент "Наставник по собеседованиям" для mock interview. MVP построен вокруг LangGraph, Ollama, модели `llama3.2:1b`, FastAPI HTTP API, локального браузерного чата и JSON-хранилища сессий.
 
-Этот проект моделирует работу системы обработки заявок технической поддержки с использованием **LangGraph** и **локальных LLM через Ollama**.
+Telegram-бот удалён: проект больше не зависит от доступа контейнера к `api.telegram.org`. Вместо этого доступен локальный HTTP API и удобный чат в браузере.
 
-Пользователь отправляет заявку, после чего система:
-- создаёт тикет;
-- анализирует текст обращения;
-- определяет категорию проблемы и приоритет;
-- при необходимости запрашивает уточнение;
-- назначает исполнителя;
-- либо решает проблему автоматически,
-- либо передаёт её живому специалисту;
-- формирует итоговый ответ.
+Главный принцип проекта: запуск только через Docker. На хосте не нужно запускать Python, ставить зависимости или поднимать локальную базу данных.
 
----
+## Архитектура
 
-## Основная идея
+Проект разделён по слоям чистой архитектуры:
 
-Проект показывает, как можно представить бизнес-логику обработки заявок в виде графа состояний.
+- `app/api` - FastAPI routes и HTTP transport.
+- `app/web` - встроенная HTML-страница чата без отдельной frontend-сборки.
+- `app/services` - use-cases: orchestration интервью, сессии, форматирование ответов.
+- `app/graph` - LangGraph workflow, state, nodes, routers, prompts.
+- `app/llm` - Ollama client и фабрика SystemMessage/HumanMessage.
+- `app/tools` - локальные tools без внешних API: подсказки и эталонные ответы из JSON.
+- `app/storage` - JSON session repository.
+- `app/schemas` - Pydantic structured output и API-схемы.
 
-Вместо линейного кода используется **граф переходов**, где каждый узел отвечает за отдельный этап обработки, а переходы зависят от текущего состояния заявки.
+## Как запустить через Docker
 
----
+1. Скопируйте пример окружения:
 
-## Используемые технологии
+```bash
+cp .env.example .env
+```
 
-- Python 3.11
-- LangGraph
-- LangChain
-- Ollama
-- Docker / Docker Compose
+2. Запустите весь стек:
 
----
+```bash
+docker compose up --build
+```
 
-## Структура графа
+Compose поднимет три сервиса:
 
-### Узлы
-- `create_ticket` — создание заявки
-- `classify_ticket` — классификация заявки
-- `ask_clarification` — уточнение данных
-- `assign_ticket` — назначение исполнителя
-- `auto_resolve_ticket` — автоматическое решение
-- `escalate_ticket` — эскалация специалисту
-- `generate_final_answer` — генерация ответа
+- `ollama` - Ollama API на `11434`.
+- `ollama_init` - одноразовый сервис, который подтягивает `llama3.2:1b`.
+- `app` - FastAPI HTTP API и чат на `http://localhost:8000`.
 
-### Переходы
-- создание заявки
-- классификация
-- уточнение
-- повторная классификация
-- назначение исполнителя
-- автоматическое решение
-- эскалация
-- финальный ответ
-- завершение процесса
+## Как пользоваться чатом
 
----
+Откройте в браузере:
 
-## State
+```text
+http://localhost:8000
+```
 
-Состояние хранит:
-- идентификатор тикета;
-- имя пользователя;
-- текст обращения;
-- уточнение;
-- категорию проблемы;
-- приоритет;
-- достаточно ли данных;
-- назначенного исполнителя;
-- тип решения;
-- статус заявки;
-- финальный ответ;
-- историю прохождения заявки.
+На странице можно:
 
----
+- выбрать `User ID`;
+- начать интервью;
+- отправлять ответы в формате чата;
+- завершить интервью;
+- сбросить сессию.
 
-## Используемые модели
+Swagger UI остаётся доступен здесь:
 
-### `qwen2.5:7b`
-Используется для:
-- классификации заявки;
-- определения приоритета;
-- генерации уточняющего вопроса.
+```text
+http://localhost:8000/docs
+```
 
-### `llama3.1:8b`
-Используется для:
-- генерации итогового ответа пользователю.
+## Как пользоваться API
 
----
+Начать интервью:
 
-## Mermaid-схема
+```bash
+curl -X POST http://localhost:8000/interviews/start \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 1}'
+```
 
-```mermaid
-graph TD
-    START --> CREATE[create_ticket]
-    CREATE --> CLASSIFY[classify_ticket]
+Ответить на текущий вопрос:
 
-    CLASSIFY -->|not enough info| CLARIFY[ask_clarification]
-    CLASSIFY -->|enough info| ASSIGN[assign_ticket]
+```bash
+curl -X POST http://localhost:8000/interviews/answer \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 1, "text": "Goroutine - это легковесный поток выполнения в Go..."}'
+```
 
-    CLARIFY --> CLASSIFY
+Завершить интервью:
 
-    ASSIGN -->|simple case| AUTO[auto_resolve_ticket]
-    ASSIGN -->|complex case| ESCALATE[escalate_ticket]
+```bash
+curl -X POST http://localhost:8000/interviews/finish \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 1}'
+```
 
-    AUTO -->|resolved| FINAL[generate_final_answer]
-    AUTO -->|failed| ESCALATE
+Сбросить сессию:
 
-    ESCALATE --> FINAL
-    FINAL --> END
+```bash
+curl -X POST http://localhost:8000/interviews/reset \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 1}'
+```
+
+Посмотреть сохранённую сессию:
+
+```bash
+curl http://localhost:8000/interviews/1/session
+```
+
+## Как работает Ollama в Compose
+
+`ollama` использует официальный образ `ollama/ollama:latest` и хранит модели в named volume `ollama_data`. Сервис имеет healthcheck через `ollama list`.
+
+`ollama_init` стартует после healthcheck, ждёт API и выполняет:
+
+```bash
+ollama pull llama3.2:1b
+```
+
+Если модель уже есть в volume, повторная загрузка не выполняется.
+
+## Проверка Ollama и модели
+
+Проверить API:
+
+```bash
+docker compose exec ollama ollama list
+```
+
+Проверить теги API:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+## Как работает graph
+
+LangGraph хранит состояние `InterviewState` и двигает интервью по узлам:
+
+- старт: `init_interview -> generate_question -> format_output`;
+- ответ пользователя: `evaluate_answer -> agent_decision`;
+- `agent_decision` выбирает action: `ask_question`, `clarify`, `generate_hint`, `get_reference_answer`, `finish`;
+- tools читают локальные JSON-справочники;
+- `final_review` формирует итоговый feedback.
+
+Structured output реализован через Pydantic-схемы:
+
+- `EvaluationResult`;
+- `DecisionResult`;
+- `FinalReviewResult`.
+
+Есть fallback-логика для некорректного JSON, недоступной Ollama, повреждённых tool JSON и неизвестных routing action.
+
+## Где хранятся сессии
+
+В контейнере сессии лежат в:
+
+```text
+/app/app/storage/sessions
+```
+
+Docker Compose монтирует туда named volume `sessions_data`. Один `user_id` = один JSON-файл.
+
+## Тесты
+
+Тесты рассчитаны на запуск в контейнере:
+
+```bash
+docker compose run --rm app pytest
+```
+
+## Что можно сделать дальше
+
+- Вынести HTML/CSS/JS из `app/web/chat_page.py` в полноценные static files.
+- Добавить streaming ответа через Server-Sent Events.
+- Сделать полноценный frontend на React/Vue/Svelte.
+- Добавить CLI-клиент для терминального интервью.
+- Подключить Slack/Discord/VK transport отдельным слоем, не меняя LangGraph и services.
+
+## Ограничения MVP
+
+- Нет базы данных и Redis.
+- Нет Telegram, webhook и внешних bot API.
+- Tools локальные и читают JSON-файлы.
+- Данные примеров есть только для `golang_backend / junior`.
+- `llama3.2:1b` маленькая модель, поэтому prompts и fallback-и сделаны максимально прямолинейными.
+- Для учебной простоты сессии сохраняются целиком в JSON после каждого шага.
