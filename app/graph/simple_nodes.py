@@ -13,6 +13,7 @@ from app.llm.prompts import (
 from app.schemas import DecisionResult, EvaluationResult, FinalReviewResult
 from app.services.response_service import ResponseService
 from app.tools.local_tools import run_tool as run_local_tool
+from app.tools.mcp_client import call_interview_tool
 from app.utils.constants import ALLOWED_QUESTION_KEYS, DEFAULT_SAFE_REPLY, LEVEL_ORDER
 from app.utils.logger import get_logger
 from app.utils.validators import normalize_action
@@ -117,9 +118,13 @@ def make_decide_next_node(llm_client: OllamaLLMClient):
     return decide_next
 
 
-def run_tool(state: InterviewState) -> InterviewState:
+async def run_tool(state: InterviewState) -> InterviewState:
     action = normalize_action(state.get("action", "clarify"))
-    state["tool_result"] = run_local_tool(action, state)
+    try:
+        state["tool_result"] = await call_interview_tool(action, state)
+    except Exception as exc:
+        logger.warning("MCP tool call failed, local fallback used: %s", exc)
+        state["tool_result"] = run_local_tool(action, state)
     return state
 
 
