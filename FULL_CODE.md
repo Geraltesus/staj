@@ -65,13 +65,19 @@
   docker/app/Dockerfile
   docker/ollama/init-model.sh
   docker-compose.yml
+  FULL_CODE.md
+  graph.mmd
+  graph.png
   README.md
   requirements.txt
+  scripts/render_graph_png.py
   tests/test_decision_router.py
   tests/test_evaluate_answer.py
   tests/test_session_store.py
   tests/test_tools.py
 ```
+
+Binary assets such as graph.png are listed in the tree but not embedded as code blocks.
 
 ## .dockerignore
 ```gitignore
@@ -2107,6 +2113,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app/app
 COPY tests /app/tests
+COPY scripts /app/scripts
 COPY docker/app/docker-entrypoint.sh /app/docker/app/docker-entrypoint.sh
 
 RUN chmod +x /app/docker/app/docker-entrypoint.sh
@@ -2205,70 +2212,262 @@ volumes:
 
 ```
 
+## graph.mmd
+```mmd
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	init_interview(init_interview)
+	generate_question(generate_question)
+	evaluate_answer(evaluate_answer)
+	agent_decision(agent_decision)
+	adjust_difficulty(adjust_difficulty)
+	save_round(save_round)
+	final_review(final_review)
+	format_output(format_output)
+	generate_hint(generate_hint)
+	get_reference_answer(get_reference_answer)
+	__end__([<p>__end__</p>]):::last
+	__start__ -.-> evaluate_answer;
+	__start__ -.-> init_interview;
+	__start__ -.-> save_round;
+	adjust_difficulty --> save_round;
+	agent_decision -. &nbsp;ask_question&nbsp; .-> adjust_difficulty;
+	agent_decision -. &nbsp;clarify&nbsp; .-> format_output;
+	agent_decision -.-> generate_hint;
+	agent_decision -.-> get_reference_answer;
+	agent_decision -. &nbsp;finish&nbsp; .-> save_round;
+	evaluate_answer --> agent_decision;
+	final_review --> format_output;
+	generate_hint --> format_output;
+	generate_question --> format_output;
+	get_reference_answer --> format_output;
+	init_interview --> generate_question;
+	save_round -.-> final_review;
+	save_round -.-> generate_question;
+	format_output --> __end__;
+	save_round -.-> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
+
+```
+
 ## README.md
 ```md
 # Interview Mentor API
 
-Учебный AI-агент "Наставник по собеседованиям" для mock interview. MVP построен вокруг LangGraph, Ollama, модели `llama3.2:1b`, FastAPI HTTP API, локального браузерного чата и JSON-хранилища сессий.
+`Interview Mentor API` - учебный AI-агент для mock interview по техническим темам. Проект показывает, как собрать понятный LangGraph workflow вокруг локальной LLM в Ollama, сохранить состояние пользователя в JSON и дать удобный интерфейс через браузерный чат. Всё запускается через Docker Compose: Python, FastAPI, Ollama, модель и окружение живут в контейнерах.
 
-Telegram-бот удалён: проект больше не зависит от доступа контейнера к `api.telegram.org`. Вместо этого доступен локальный HTTP API и удобный чат в браузере.
+![LangGraph workflow](./graph.png)
 
-Главный принцип проекта: запуск только через Docker. На хосте не нужно запускать Python, ставить зависимости или поднимать локальную базу данных.
+## Что умеет проект
+
+Проект умеет запускаться полностью через Docker Compose, автоматически поднимать Ollama и загружать модель `llama3.2:1b`, открывать локальный веб-чат на `http://localhost:8000`, начинать mock interview, задавать вопросы по теме `golang_backend`, принимать ответы пользователя, оценивать ответы через LLM, выбирать следующий шаг через LangGraph, просить уточнение, выдавать подсказку, показывать эталонный ответ, сохранять состояние сессии в JSON, завершать интервью с итоговым feedback, а также предоставлять REST API и Swagger UI для тестирования без Telegram и внешних bot API.
+
+## Короткое описание графа
+
+Граф симулирует работу AI-наставника по техническому собеседованию: агент начинает mock interview, задаёт вопрос, принимает ответ пользователя, оценивает его, сам выбирает следующий шаг и в конце выдаёт итоговый feedback. Узлы: `init_interview`, `generate_question`, `evaluate_answer`, `agent_decision`, `adjust_difficulty`, `save_round`, `generate_hint`, `get_reference_answer`, `final_review`, `format_output`. Рёбра: интервью начато, вопрос задан, ответ оценён, решение принято, сложность изменена, раунд сохранён, подсказка получена, эталонный ответ показан, финальный review создан, интервью завершено. State: сессия пользователя с темой, уровнем, текущим вопросом, ответом, оценкой, feedback, history, выбранным действием и итоговым review. Модель: `llama3.2:1b` через Ollama для генерации вопросов, оценки ответов, выбора действия и финального feedback.
 
 ## Архитектура
 
-Проект разделён по слоям чистой архитектуры:
+Проект разделён на несколько слоёв, чтобы его было удобно читать и расширять:
 
-- `app/api` - FastAPI routes и HTTP transport.
-- `app/web` - встроенная HTML-страница чата без отдельной frontend-сборки.
-- `app/services` - use-cases: orchestration интервью, сессии, форматирование ответов.
-- `app/graph` - LangGraph workflow, state, nodes, routers, prompts.
-- `app/llm` - Ollama client и фабрика SystemMessage/HumanMessage.
-- `app/tools` - локальные tools без внешних API: подсказки и эталонные ответы из JSON.
-- `app/storage` - JSON session repository.
-- `app/schemas` - Pydantic structured output и API-схемы.
+- `app/api` - HTTP endpoints FastAPI.
+- `app/web` - встроенный браузерный чат без отдельной frontend-сборки.
+- `app/services` - orchestration use-cases: интервью, сессии, форматирование ответов.
+- `app/graph` - LangGraph state machine, nodes, routers и prompts.
+- `app/llm` - клиент Ollama и фабрика `SystemMessage` / `HumanMessage`.
+- `app/tools` - локальные tools на JSON-файлах: подсказки и эталонные ответы.
+- `app/storage` - JSON-хранилище сессий.
+- `app/schemas` - Pydantic-схемы для structured output и HTTP API.
+- `scripts` - вспомогательные скрипты, включая генерацию `graph.png`.
+- `docker` - Dockerfile и entrypoint-скрипты.
 
-## Как запустить через Docker
+## Использованные библиотеки
 
-1. Скопируйте пример окружения:
+| Библиотека | Для чего используется |
+|---|---|
+| `FastAPI` | HTTP API и выдача HTML-чата |
+| `Uvicorn` | ASGI-сервер внутри контейнера `app` |
+| `LangGraph` | Построение графа интервью и маршрутизация между узлами |
+| `LangChain Core` | Сообщения `SystemMessage` и `HumanMessage` |
+| `langchain-ollama` | Подключение к Ollama как к chat model |
+| `Pydantic` | Structured output, валидация LLM-ответов и API-схем |
+| `pydantic-settings` | Настройки через переменные окружения |
+| | `pytest` | Тесты tools, router, схем и session storage |
+| `httpx` | HTTP-клиент, полезен для тестов и диагностики |
+
+## Использованные модели и роли
+
+В проекте используется одна локальная модель: `llama3.2:1b` через Ollama. Она работает в нескольких ролях, заданных через отдельные prompts и раздельные `SystemMessage` / `HumanMessage`.
+
+| Узел | Модель | Роль |
+|---|---|---|
+| `generate_question` | `llama3.2:1b` | Строгий технический интервьюер, который генерирует следующий вопрос |
+| `evaluate_answer` | `llama3.2:1b` | Объективный оценщик, который возвращает `EvaluationResult` |
+| `agent_decision` | `llama3.2:1b` | Управляющий интервью, который выбирает следующее действие |
+| `final_review` | `llama3.2:1b` | Наставник, который составляет итоговый review |
+
+Локальные tools не используют отдельную модель. `generate_hint` достаёт подсказку из `app/tools/data/hints.json`, а `get_reference_answer` достаёт эталонный ответ из `app/tools/data/reference_answers.json`.
+
+## State графа
+
+State хранится как обычный JSON-совместимый словарь `InterviewState`. Один пользователь = один JSON-файл в session storage.
+
+Основные поля state:
+
+- `user_id` - идентификатор пользователя.
+- `chat_id` - идентификатор диалога, для HTTP API обычно равен `user_id`.
+- `interview_started` - начато ли интервью.
+- `topic` - тема интервью, по умолчанию `golang_backend`.
+- `current_level` - текущий уровень, по умолчанию `junior`.
+- `max_questions` - максимум вопросов, по умолчанию `3`.
+- `current_question_index` - номер текущего вопроса.
+- `current_question` - текст текущего вопроса.
+- `current_question_key` - ключ вопроса для локальных tools.
+- `current_answer` - последний ответ пользователя.
+- `current_score` - оценка ответа от `0` до `10`.
+- `current_verdict` - `strong`, `medium` или `weak`.
+- `current_feedback` - комментарий оценщика.
+- `current_missing_points` - список недостающих пунктов.
+- `pending_action` - действие, выбранное агентом.
+- `tool_result` - результат локального tool.
+- `history` - история завершённых раундов.
+- `final_summary`, `strong_sides`, `weak_sides`, `improvement_plan` - итоговый review.
+- `bot_reply` - текст, который возвращается в чат/API.
+- `error` - безопасно сохранённая ошибка, если что-то пошло не так.
+
+## Узлы графа
+
+Всего в графе 10 узлов: 7 основных и 3 вспомогательных.
+
+| Узел | Тип | Что делает |
+|---|---|---|
+| `init_interview` | Основной | Начинает новую сессию интервью, выставляет стартовые флаги и готовит state к первому вопросу |
+| `generate_question` | Основной | Вызывает LLM, генерирует один вопрос и `question_key`, учитывая тему, уровень и историю |
+| `evaluate_answer` | Основной | Вызывает LLM и получает structured output `EvaluationResult` со score, verdict, feedback и missing points |
+| `agent_decision` | Основной | Вызывает LLM и получает `DecisionResult`: что делать дальше и как менять сложность |
+| `generate_hint` | Основной | Вызывает локальный JSON tool и возвращает подсказку по текущему вопросу |
+| `get_reference_answer` | Основной | Вызывает локальный JSON tool и возвращает эталонный ответ по текущему вопросу |
+| `final_review` | Основной | Вызывает LLM и формирует итоговый review по истории интервью |
+| `adjust_difficulty` | Вспомогательный | Меняет уровень сложности по решению агента: `up`, `keep`, `down` |
+| `save_round` | Вспомогательный | Сохраняет завершённый вопрос-ответ в `history` |
+| `format_output` | Вспомогательный | Превращает state в человекочитаемый ответ для браузерного чата и API |
+
+## Рёбра графа
+
+Всего в графе 18 рёбер: 10 основных и 8 вспомогательных. По рёбрам: 10 основных - успешная линия интервью от старта до финального review, плюс ветки уточнения, подсказки и эталонного ответа; 8 вспомогательных - входы в граф, сохранение раунда, форматирование ответа и завершение выполнения.
+
+| Ребро | Тип | Что означает |
+|---|---|---|
+| `START -> init_interview` | Вспомогательное | Вход в граф для новой сессии |
+| `START -> evaluate_answer` | Вспомогательное | Вход в граф, когда пользователь прислал ответ |
+| `START -> save_round` | Вспомогательное | Вход в граф, когда пользователь завершает интервью |
+| `init_interview -> generate_question` | Основное | Интервью начато, можно задать первый вопрос |
+| `generate_question -> format_output` | Вспомогательное | Вопрос нужно подготовить для ответа UI/API |
+| `evaluate_answer -> agent_decision` | Основное | Ответ оценён, агент должен выбрать следующий шаг |
+| `agent_decision -> adjust_difficulty` | Основное | Агент решил перейти к следующему вопросу |
+| `agent_decision -> format_output` | Основное | Агент решил попросить уточнение |
+| `agent_decision -> generate_hint` | Основное | Агент решил дать подсказку |
+| `agent_decision -> get_reference_answer` | Основное | Агент решил показать эталонный ответ |
+| `agent_decision -> save_round` | Основное | Агент решил завершить интервью |
+| `adjust_difficulty -> save_round` | Вспомогательное | Сложность обновлена, текущий раунд нужно сохранить |
+| `save_round -> generate_question` | Основное | Раунд сохранён, можно задать следующий вопрос |
+| `save_round -> final_review` | Основное | Раунд сохранён, пора сформировать итоговый review |
+| `generate_hint -> format_output` | Вспомогательное | Подсказку нужно отформатировать для пользователя |
+| `get_reference_answer -> format_output` | Вспомогательное | Эталонный ответ нужно отформатировать для пользователя |
+| `final_review -> format_output` | Вспомогательное | Итоговый review нужно отформатировать для пользователя |
+| `format_output -> END` | Вспомогательное | Ответ готов, выполнение графа завершено |
+
+## Mermaid-схема
+
+```mermaid
+flowchart TD
+    Start((START))
+    End((END))
+
+    Start -->|new session| init_interview
+    Start -->|answer| evaluate_answer
+    Start -->|finish command| save_round
+
+    init_interview -->|interview started| generate_question
+    generate_question -->|question ready| format_output
+
+    evaluate_answer -->|answer evaluated| agent_decision
+
+    agent_decision -->|ask_question| adjust_difficulty
+    agent_decision -->|clarify| format_output
+    agent_decision -->|generate_hint| generate_hint
+    agent_decision -->|get_reference_answer| get_reference_answer
+    agent_decision -->|finish| save_round
+
+    adjust_difficulty -->|difficulty changed| save_round
+    save_round -->|continue| generate_question
+    save_round -->|finish| final_review
+
+    generate_hint -->|hint reply| format_output
+    get_reference_answer -->|reference reply| format_output
+    final_review -->|summary reply| format_output
+    format_output -->|response returned| End
+```
+
+## Как запустить проект локально
+
+Локально здесь означает “на вашей машине через Docker”. Запускать Python на хосте не нужно.
+
+1. Убедитесь, что установлен Docker и Docker Compose.
+
+2. Скопируйте переменные окружения:
 
 ```bash
 cp .env.example .env
 ```
 
-2. Запустите весь стек:
+3. Запустите весь стек:
 
 ```bash
 docker compose up --build
 ```
 
-Compose поднимет три сервиса:
+4. Дождитесь, пока `ollama_init` скачает модель. В логах должно быть что-то вроде:
 
-- `ollama` - Ollama API на `11434`.
-- `ollama_init` - одноразовый сервис, который подтягивает `llama3.2:1b`.
-- `app` - FastAPI HTTP API и чат на `http://localhost:8000`.
+```text
+Pulling model llama3.2:1b...
+Ollama model initialization completed.
+```
 
-## Как пользоваться чатом
+Если модель уже скачана, будет:
 
-Откройте в браузере:
+```text
+Model llama3.2:1b already exists.
+```
+
+5. Откройте чат в браузере:
 
 ```text
 http://localhost:8000
 ```
 
-На странице можно:
-
-- выбрать `User ID`;
-- начать интервью;
-- отправлять ответы в формате чата;
-- завершить интервью;
-- сбросить сессию.
-
-Swagger UI остаётся доступен здесь:
+6. Swagger UI доступен здесь:
 
 ```text
 http://localhost:8000/docs
 ```
+
+## Как пользоваться чатом
+
+На странице `http://localhost:8000` можно:
+
+- выбрать `User ID`;
+- нажать `Начать`;
+- отвечать на вопросы в поле чата;
+- нажать `Завершить`, чтобы получить итоговый feedback;
+- нажать `Сбросить сессию`, чтобы начать заново.
 
 ## Как пользоваться API
 
@@ -2310,84 +2509,90 @@ curl -X POST http://localhost:8000/interviews/reset \
 curl http://localhost:8000/interviews/1/session
 ```
 
-## Как работает Ollama в Compose
+## Docker Compose
 
-`ollama` использует официальный образ `ollama/ollama:latest` и хранит модели в named volume `ollama_data`. Сервис имеет healthcheck через `ollama list`.
+Compose поднимает три сервиса:
 
-`ollama_init` стартует после healthcheck, ждёт API и выполняет:
+| Сервис | Что делает |
+|---|---|
+| `ollama` | Запускает Ollama API и хранит модели в volume `ollama_data` |
+| `ollama_init` | Одноразово проверяет модель и выполняет `ollama pull llama3.2:1b`, если модели нет |
+| `app` | Запускает FastAPI, браузерный чат и REST API на порту `8000` |
 
-```bash
-ollama pull llama3.2:1b
-```
+Volumes:
 
-Если модель уже есть в volume, повторная загрузка не выполняется.
+- `ollama_data` - модели Ollama.
+- `sessions_data` - JSON-сессии пользователей.
 
-## Проверка Ollama и модели
+## Проверка Ollama
 
-Проверить API:
+Проверить список моделей:
 
 ```bash
 docker compose exec ollama ollama list
 ```
 
-Проверить теги API:
+Проверить HTTP API Ollama:
 
 ```bash
 curl http://localhost:11434/api/tags
 ```
 
-## Как работает graph
+## Генерация картинки графа
 
-LangGraph хранит состояние `InterviewState` и двигает интервью по узлам:
+Файл `graph.png` уже лежит в корне проекта и используется в README. Если граф изменился, картинку можно перегенерировать. Текущая версия использует первый локальный renderer на `Pillow`: он не зависит от `mermaid.ink`, Node.js, Mermaid CLI или внешнего интернета, поэтому стабильно работает в Docker/WSL.
 
-- старт: `init_interview -> generate_question -> format_output`;
-- ответ пользователя: `evaluate_answer -> agent_decision`;
-- `agent_decision` выбирает action: `ask_question`, `clarify`, `generate_hint`, `get_reference_answer`, `finish`;
-- tools читают локальные JSON-справочники;
-- `final_review` формирует итоговый feedback.
+Через Docker, без локальной установки Python:
 
-Structured output реализован через Pydantic-схемы:
-
-- `EvaluationResult`;
-- `DecisionResult`;
-- `FinalReviewResult`.
-
-Есть fallback-логика для некорректного JSON, недоступной Ollama, повреждённых tool JSON и неизвестных routing action.
-
-## Где хранятся сессии
-
-В контейнере сессии лежат в:
-
-```text
-/app/app/storage/sessions
+```bash
+docker compose build app
+docker compose run --rm --entrypoint python -v "$PWD:/workspace" app /app/scripts/render_graph_png.py /workspace/graph.png
 ```
 
-Docker Compose монтирует туда named volume `sessions_data`. Один `user_id` = один JSON-файл.
+Если Python и зависимости установлены локально, можно так:
+
+```bash
+python scripts/render_graph_png.py graph.png
+```
 
 ## Тесты
 
-Тесты рассчитаны на запуск в контейнере:
+Запуск тестов в контейнере:
 
 ```bash
 docker compose run --rm app pytest
 ```
 
-## Что можно сделать дальше
+Тесты покрывают:
 
-- Вынести HTML/CSS/JS из `app/web/chat_page.py` в полноценные static files.
-- Добавить streaming ответа через Server-Sent Events.
-- Сделать полноценный frontend на React/Vue/Svelte.
-- Добавить CLI-клиент для терминального интервью.
-- Подключить Slack/Discord/VK transport отдельным слоем, не меняя LangGraph и services.
+- чтение локальных tools из JSON;
+- fallback для tools;
+- маршрутизацию по action;
+- сохранение и загрузку JSON-сессии;
+- нормализацию structured output.
 
 ## Ограничения MVP
 
 - Нет базы данных и Redis.
 - Нет Telegram, webhook и внешних bot API.
+- Нет streaming-ответов, API возвращает готовый результат шага.
 - Tools локальные и читают JSON-файлы.
 - Данные примеров есть только для `golang_backend / junior`.
 - `llama3.2:1b` маленькая модель, поэтому prompts и fallback-и сделаны максимально прямолинейными.
 - Для учебной простоты сессии сохраняются целиком в JSON после каждого шага.
+
+## Что можно улучшить дальше
+
+- Вынести HTML/CSS/JS из `app/web/chat_page.py` в полноценные static files.
+- Добавить streaming ответа через Server-Sent Events.
+- Сделать frontend на React/Vue/Svelte.
+- Добавить CLI-клиент для терминального интервью.
+- Добавить больше тем и уровней в JSON tools.
+- Подключить другой transport отдельным слоем, не меняя LangGraph и services.
+
+
+
+
 
 ```
 
@@ -2398,10 +2603,169 @@ langchain-core>=0.3.0,<0.4.0
 langchain-ollama>=0.2.0,<0.4.0
 fastapi>=0.115.0,<1.0.0
 uvicorn[standard]>=0.30.0,<1.0.0
+pillow>=10.4,<12.0
 pydantic>=2.8,<3.0
 pydantic-settings>=2.4,<3.0
 pytest>=8.3,<9.0
 httpx>=0.27,<1.0
+
+```
+
+## scripts/render_graph_png.py
+```py
+"""Render the Interview Mentor graph to a PNG file.
+
+This is the first local renderer used in the project: it draws a deterministic
+PNG without external services such as mermaid.ink and without Node/Mermaid CLI.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+CANVAS_WIDTH = 1800
+CANVAS_HEIGHT = 1350
+BACKGROUND = (255, 250, 240)
+INK = (23, 33, 27)
+MUTED = (89, 103, 92)
+ACCENT = (224, 93, 47)
+SAGE = (87, 116, 91)
+PANEL = (245, 230, 200)
+TOOL = (219, 233, 209)
+LINE = (90, 77, 57)
+
+NODES = {
+    "START": (760, 40, 1040, 120, "START", "entry"),
+    "init_interview": (120, 210, 420, 310, "init_interview", "start session"),
+    "generate_question": (590, 210, 910, 310, "generate_question", "LLM asks question"),
+    "format_output": (1180, 210, 1500, 310, "format_output", "reply for chat/API"),
+    "evaluate_answer": (120, 460, 420, 560, "evaluate_answer", "LLM scores answer"),
+    "agent_decision": (590, 460, 910, 560, "agent_decision", "LLM chooses route"),
+    "adjust_difficulty": (1180, 430, 1500, 530, "adjust_difficulty", "up / keep / down"),
+    "save_round": (1180, 650, 1500, 750, "save_round", "append history"),
+    "generate_hint": (120, 760, 420, 860, "generate_hint", "local JSON tool"),
+    "get_reference_answer": (590, 760, 910, 860, "get_reference_answer", "local JSON tool"),
+    "final_review": (1180, 890, 1500, 990, "final_review", "LLM final feedback"),
+    "END": (760, 1150, 1040, 1230, "END", "done"),
+}
+
+EDGES = [
+    ("START", "init_interview", "new session"),
+    ("START", "evaluate_answer", "answer"),
+    ("START", "save_round", "finish command"),
+    ("init_interview", "generate_question", "interview started"),
+    ("generate_question", "format_output", "question ready"),
+    ("evaluate_answer", "agent_decision", "answer evaluated"),
+    ("agent_decision", "adjust_difficulty", "ask_question"),
+    ("agent_decision", "format_output", "clarify"),
+    ("agent_decision", "generate_hint", "hint"),
+    ("agent_decision", "get_reference_answer", "reference"),
+    ("agent_decision", "save_round", "finish"),
+    ("adjust_difficulty", "save_round", "difficulty changed"),
+    ("save_round", "generate_question", "continue"),
+    ("save_round", "final_review", "finish"),
+    ("generate_hint", "format_output", "hint reply"),
+    ("get_reference_answer", "format_output", "reference reply"),
+    ("final_review", "format_output", "summary reply"),
+    ("format_output", "END", "response returned"),
+]
+
+
+def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+    ]
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def center(box: tuple[int, int, int, int]) -> tuple[int, int]:
+    x1, y1, x2, y2 = box
+    return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def edge_points(source: str, target: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    sx1, sy1, sx2, sy2, *_ = NODES[source]
+    tx1, ty1, tx2, ty2, *_ = NODES[target]
+    scx, scy = center((sx1, sy1, sx2, sy2))
+    tcx, tcy = center((tx1, ty1, tx2, ty2))
+
+    if abs(tcx - scx) > abs(tcy - scy):
+        start = (sx2, scy) if tcx > scx else (sx1, scy)
+        end = (tx1, tcy) if tcx > scx else (tx2, tcy)
+    else:
+        start = (scx, sy2) if tcy > scy else (scx, sy1)
+        end = (tcx, ty1) if tcy > scy else (tcx, ty2)
+    return start, end
+
+
+def draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int], label: str, font: ImageFont.ImageFont) -> None:
+    draw.line([start, end], fill=LINE, width=3)
+    ex, ey = end
+    sx, sy = start
+    if abs(ex - sx) > abs(ey - sy):
+        direction = 1 if ex > sx else -1
+        arrow = [(ex, ey), (ex - 14 * direction, ey - 8), (ex - 14 * direction, ey + 8)]
+    else:
+        direction = 1 if ey > sy else -1
+        arrow = [(ex, ey), (ex - 8, ey - 14 * direction), (ex + 8, ey - 14 * direction)]
+    draw.polygon(arrow, fill=LINE)
+
+    lx = (sx + ex) // 2
+    ly = (sy + ey) // 2
+    bbox = draw.textbbox((0, 0), label, font=font)
+    pad = 5
+    draw.rounded_rectangle(
+        [lx - (bbox[2] - bbox[0]) // 2 - pad, ly - 12, lx + (bbox[2] - bbox[0]) // 2 + pad, ly + 12],
+        radius=8,
+        fill=BACKGROUND,
+        outline=(220, 203, 170),
+    )
+    draw.text((lx, ly), label, fill=MUTED, font=font, anchor="mm")
+
+
+def draw_node(draw: ImageDraw.ImageDraw, data: tuple[int, int, int, int, str, str], title_font: ImageFont.ImageFont, subtitle_font: ImageFont.ImageFont) -> None:
+    x1, y1, x2, y2, title, subtitle = data
+    fill = TOOL if "tool" in subtitle else PANEL
+    outline = ACCENT if title in {"agent_decision", "final_review"} else SAGE
+    draw.rounded_rectangle([x1, y1, x2, y2], radius=24, fill=fill, outline=outline, width=4)
+    draw.text(((x1 + x2) // 2, y1 + 35), title, fill=INK, font=title_font, anchor="mm")
+    draw.text(((x1 + x2) // 2, y1 + 68), subtitle, fill=MUTED, font=subtitle_font, anchor="mm")
+
+
+def render(output_path: Path) -> None:
+    image = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), BACKGROUND)
+    draw = ImageDraw.Draw(image)
+    title_font = load_font(42, bold=True)
+    node_font = load_font(24, bold=True)
+    subtitle_font = load_font(18)
+    edge_font = load_font(14)
+
+    draw.text((80, 55), "Interview Mentor LangGraph", fill=INK, font=title_font)
+    draw.text((80, 110), "10 nodes, 18 edges, Ollama llama3.2:1b + local JSON tools", fill=MUTED, font=subtitle_font)
+
+    for source, target, label in EDGES:
+        draw_arrow(draw, *edge_points(source, target), label, edge_font)
+
+    for node in NODES.values():
+        draw_node(draw, node, node_font, subtitle_font)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output_path, "PNG")
+
+
+if __name__ == "__main__":
+    destination = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("graph.png")
+    render(destination)
+    print(f"Graph PNG written to {destination}")
 
 ```
 
