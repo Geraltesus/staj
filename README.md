@@ -106,6 +106,100 @@ schemas/__init__.py      # API и structured-output схемы
 5. Узел `respond` формирует `bot_reply`.
 6. Обновлённый state сохраняется в JSON и возвращается клиенту через API.
 
+## C4 Модель Архитектуры
+
+### C1: System Context
+
+```mermaid
+flowchart LR
+    Candidate["Кандидат (Пользователь)"]
+    InterviewSystem["Interview Mentor API"]
+    Ollama["Ollama (llama3.2:1b)"]
+    SessionFiles["JSON Session Storage"]
+    MCPTools["MCP Knowledge Tools"]
+
+    Candidate -->|"HTTP/REST + Web Chat"| InterviewSystem
+    InterviewSystem -->|"LLM prompts / structured output"| Ollama
+    InterviewSystem -->|"read/write session state"| SessionFiles
+    InterviewSystem -->|"tool calls (hint/reference)"| MCPTools
+```
+
+### C2: Container Diagram
+
+```mermaid
+flowchart TB
+    subgraph Client["Client"]
+        Browser["Browser Chat UI (app/static)"]
+        ApiClient["API Client (curl/Postman)"]
+    end
+
+    subgraph App["Interview Mentor API (FastAPI Container)"]
+        FastAPI["FastAPI + Routes"]
+        InterviewService["InterviewService (use-case orchestration)"]
+        LangGraph["LangGraph Workflow"]
+        ResponseService["ResponseService"]
+        SessionRepo["SessionRepository (JSON)"]
+        MCPClient["MCP Client"]
+    end
+
+    subgraph Infra["External/Infra Containers"]
+        Ollama["Ollama Container"]
+        MCPServer["MCP Knowledge Server"]
+        SessionsVolume["sessions_data volume"]
+    end
+
+    Browser --> FastAPI
+    ApiClient --> FastAPI
+    FastAPI --> InterviewService
+    InterviewService --> LangGraph
+    LangGraph --> ResponseService
+    InterviewService --> SessionRepo
+    SessionRepo --> SessionsVolume
+    LangGraph --> Ollama
+    LangGraph --> MCPClient
+    MCPClient --> MCPServer
+```
+
+### C3: Component Diagram (Application Container)
+
+```mermaid
+flowchart LR
+    Routes["app/api/routes.py"]
+    Deps["app/dependencies.py"]
+    Service["app/services/interview_service.py"]
+    GraphBuilder["app/graph/builder.py"]
+    Nodes["app/graph/simple_nodes.py"]
+    State["app/graph/state.py"]
+    Prompts["app/llm/prompts.py"]
+    LLMClient["app/llm/client.py"]
+    Schemas["app/schemas/__init__.py"]
+    Response["app/services/response_service.py"]
+    Sessions["app/storage/sessions.py"]
+    LocalTools["app/tools/local_tools.py"]
+    MCPClient["app/tools/mcp_client.py"]
+    MCPServer["app/mcp/interview_knowledge_server.py"]
+
+    Routes --> Deps
+    Deps --> Service
+    Deps --> GraphBuilder
+    Deps --> Sessions
+
+    Service --> Sessions
+    Service --> GraphBuilder
+
+    GraphBuilder --> Nodes
+    GraphBuilder --> State
+
+    Nodes --> Prompts
+    Nodes --> LLMClient
+    Nodes --> Schemas
+    Nodes --> Response
+    Nodes --> LocalTools
+    Nodes --> MCPClient
+
+    MCPClient --> MCPServer
+```
+
 ## Docker
 
 `docker/app/Dockerfile` собирает контейнер приложения на базе `python:3.11-slim`: устанавливает зависимости из `requirements.txt`, копирует `app` и `tests`, затем запускает FastAPI через `uvicorn app.main:app`. Контейнер ожидает, что API будет доступен на `0.0.0.0:8000`, а адрес Ollama придёт из переменной `OLLAMA_BASE_URL`.
