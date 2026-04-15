@@ -56,6 +56,56 @@ schemas/__init__.py      # API и structured-output схемы
   static/                  # браузерный чат
 ```
 
+## Архитектура По Слоям
+
+Проект разделён на слои с явной ответственностью:
+
+1. `Transport (HTTP + UI)`
+- `app/main.py` поднимает FastAPI и раздаёт web-интерфейс;
+- `app/api/routes.py` содержит HTTP endpoints (`/interviews/start`, `/answer`, `/finish`, `/reset`);
+- `app/static/*` - минимальный браузерный чат, который ходит в те же API.
+
+2. `Composition / Dependency Injection`
+- `app/dependencies.py` собирает зависимости приложения;
+- здесь создаются `OllamaLLMClient`, LangGraph и `SessionRepository`, затем передаются в `InterviewService`.
+
+3. `Application Layer (Use Case)`
+- `app/services/interview_service.py` - главный оркестратор сценария интервью;
+- обрабатывает команды, загружает/сохраняет state, запускает граф;
+- `app/services/response_service.py` - форматирует пользовательский ответ из state.
+
+4. `Domain Workflow (LangGraph)`
+- `app/graph/builder.py` - wiring графа и условные переходы;
+- `app/graph/simple_nodes.py` - узлы (`ask_question`, `evaluate_answer`, `decide_next`, `run_tool`, `final_review`, `respond`);
+- `app/graph/state.py` - TypedDict состояния интервью (`InterviewState`).
+
+5. `LLM + Prompts`
+- `app/llm/client.py` - обёртка над Ollama с retry и fallback для structured output;
+- `app/llm/prompts.py` - системные/пользовательские промпты и сборка сообщений;
+- `app/schemas/__init__.py` - Pydantic-схемы API и структурированных ответов LLM.
+
+6. `Tools Layer`
+- `app/tools/local_tools.py` - локальные JSON tools (`generate_hint`, `get_reference_answer`);
+- `app/tools/mcp_client.py` - вызов этих tools через MCP stdio;
+- `app/mcp/interview_knowledge_server.py` - MCP-сервер базы знаний.
+
+7. `Persistence`
+- `app/storage/sessions.py` - JSON-хранилище сессий;
+- поддерживается миграция старых полей состояния при чтении.
+
+8. `Cross-cutting`
+- `app/config.py` - настройки из env (`OLLAMA_BASE_URL`, `MAX_QUESTIONS`, `DEFAULT_LEVEL` и т.д.);
+- `app/utils/constants.py` - допустимые actions/question_keys и безопасные fallback-ответы.
+
+### Поток Запроса (End-to-End)
+
+1. Клиент отправляет запрос в HTTP endpoint (`/interviews/*`).
+2. `InterviewService` загружает state сессии пользователя.
+3. Сервис запускает LangGraph (`graph.ainvoke(state)`).
+4. Узлы графа последовательно: задают вопрос, оценивают ответ, выбирают следующий шаг, при необходимости вызывают tool или финальный review.
+5. Узел `respond` формирует `bot_reply`.
+6. Обновлённый state сохраняется в JSON и возвращается клиенту через API.
+
 ## Docker
 
 `docker/app/Dockerfile` собирает контейнер приложения на базе `python:3.11-slim`: устанавливает зависимости из `requirements.txt`, копирует `app` и `tests`, затем запускает FastAPI через `uvicorn app.main:app`. Контейнер ожидает, что API будет доступен на `0.0.0.0:8000`, а адрес Ollama придёт из переменной `OLLAMA_BASE_URL`.
@@ -124,18 +174,18 @@ flowchart TD
 
 State хранится как JSON-совместимый словарь:
 
-- `user_id`, `chat_id`;
-- `interview_started`;
-- `topic`, `level`, `max_questions`;
-- `question_index`, `question`, `question_key`;
-- `answer`;
-- `score`, `verdict`, `feedback`, `missing_points`;
-- `action`;
-- `next_question_key`;
-- `tool_result`;
-- `history`;
-- `final_summary`, `strong_sides`, `weak_sides`, `improvement_plan`;
-- `bot_reply`.
+- `user_id`, `chat_id` - идентификаторы пользователя и конкретного интервью-чата;
+- `interview_started` - флаг, что интервью уже запущено;
+- `topic`, `level`, `max_questions` - тема, уровень и лимит вопросов в сессии;
+- `question_index`, `question`, `question_key` - номер текущего вопроса, его текст и ключ в локальной базе;
+- `answer` - последний ответ кандидата;
+- `score`, `verdict`, `feedback`, `missing_points` - оценка ответа, вердикт, комментарий и что не хватило;
+- `action` - выбранное агентом следующее действие (`ask_question`/`clarify`/`tool`/`finish`);
+- `next_question_key` - ключ вопроса, который нужно задать следующим шагом;
+- `tool_result` - результат локального tool (подсказка или эталонный ответ);
+- `history` - журнал завершённых раундов интервью;
+- `final_summary`, `strong_sides`, `weak_sides`, `improvement_plan` - итоговый review по интервью;
+- `bot_reply` - финальный текст, который возвращается в API/чат.
 
 Старые JSON-сессии с полями вида `current_question` автоматически мигрируются при загрузке.
 
@@ -148,8 +198,10 @@ State хранится как JSON-совместимый словарь:
 | `LangGraph` | Граф интервью и conditional routing |
 | `LangChain Core` | `SystemMessage` и `HumanMessage` |
 | `langchain-ollama` | Подключение к Ollama |
+| `mcp` | интеграция с Model Context Protocol |
 | `Pydantic` | API-схемы и structured output |
 | `pydantic-settings` | Настройки из env |
+| `httpx` | HTTP-клиент для тестов/внешних запросов |
 | `pytest` | Тесты |
 
 ## Модели И Роли
